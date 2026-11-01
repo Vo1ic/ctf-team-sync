@@ -1,0 +1,15 @@
+{
+  "name": "ctf-team-sync-web-tests",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test:web": "node --test web-tests/*.test.js",
+    "test:e2e": "playwright test",
+    "format:web": "prettier --check \"src/team_sync/web/*.{js,css,html}\" \"web-tests/**/*.js\" playwright.config.js package.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "prettier": "^3.9.10"
+  }
+}

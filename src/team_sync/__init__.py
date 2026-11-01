@@ -1,0 +1,1 @@
+"""Team Sync coordination core."""

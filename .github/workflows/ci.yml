@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: team_sync
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: team_sync_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U team_sync -d team_sync_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEAM_SYNC_TEST_DATABASE_URL: postgresql+psycopg://team_sync:ci-only-password@localhost:5432/team_sync_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.6'
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: |
+          uv sync --frozen
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Python checks
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest -q
+      - name: Check generated contracts
+        run: |
+          uv run team-sync-contracts
+          git diff --exit-code -- contracts/
+      - name: Browser and frontend checks
+        run: |
+          npm run format:web
+          npm run test:web
+          npm run test:e2e
+      - name: Build Python package
+        run: uv build

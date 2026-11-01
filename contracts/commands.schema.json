@@ -1,0 +1,405 @@
+{
+  "challenge.create": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Title",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "maxLength": 100000,
+        "title": "Description",
+        "type": "string"
+      },
+      "category": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Category"
+      }
+    },
+    "required": [
+      "title"
+    ],
+    "title": "ChallengeCreate",
+    "type": "object"
+  },
+  "task.create": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Title",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "maxLength": 100000,
+        "title": "Description",
+        "type": "string"
+      },
+      "category": {
+        "default": null,
+        "title": "Category",
+        "type": "null"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      }
+    },
+    "required": [
+      "title"
+    ],
+    "title": "TaskCreate",
+    "type": "object"
+  },
+  "task.claim": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "lease_seconds": {
+        "default": 300,
+        "maximum": 3600,
+        "minimum": 10,
+        "title": "Lease Seconds",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "Lease",
+    "type": "object"
+  },
+  "task.renew": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "lease_seconds": {
+        "default": 300,
+        "maximum": 3600,
+        "minimum": 10,
+        "title": "Lease Seconds",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "Lease",
+    "type": "object"
+  },
+  "task.complete": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "result": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Result",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "result"
+    ],
+    "title": "Complete",
+    "type": "object"
+  },
+  "finding.create": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Title",
+        "type": "string"
+      },
+      "body": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Body",
+        "type": "string"
+      },
+      "kind": {
+        "default": "observation",
+        "enum": [
+          "observation",
+          "hypothesis",
+          "result",
+          "failed_attempt"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "evidence": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Evidence",
+        "type": "string"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      }
+    },
+    "required": [
+      "title",
+      "body",
+      "evidence"
+    ],
+    "title": "FindingCreate",
+    "type": "object"
+  },
+  "flag.create": {
+    "additionalProperties": false,
+    "properties": {
+      "value": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Value",
+        "type": "string"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      },
+      "target": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target"
+      },
+      "round": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Round"
+      },
+      "expires_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires At"
+      }
+    },
+    "required": [
+      "value"
+    ],
+    "title": "FlagCreate",
+    "type": "object"
+  },
+  "flag.verify": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "status": {
+        "enum": [
+          "confirmed",
+          "rejected"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "method": {
+        "enum": [
+          "manual",
+          "local_checker",
+          "platform"
+        ],
+        "title": "Method",
+        "type": "string"
+      },
+      "evidence": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Evidence",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "status",
+      "method",
+      "evidence"
+    ],
+    "title": "FlagVerify",
+    "type": "object"
+  },
+  "submission.create": {
+    "additionalProperties": false,
+    "properties": {
+      "outcome": {
+        "enum": [
+          "accepted",
+          "rejected",
+          "unknown"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
+      "evidence": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Evidence",
+        "type": "string"
+      }
+    },
+    "required": [
+      "outcome",
+      "evidence"
+    ],
+    "title": "SubmissionCreate",
+    "type": "object"
+  },
+  "message.send": {
+    "additionalProperties": false,
+    "properties": {
+      "recipient_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Recipient Id"
+      },
+      "body": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Body",
+        "type": "string"
+      }
+    },
+    "required": [
+      "body"
+    ],
+    "title": "MessageCreate",
+    "type": "object"
+  },
+  "message.ack": {
+    "additionalProperties": false,
+    "properties": {
+      "stage": {
+        "enum": [
+          "received",
+          "processed"
+        ],
+        "title": "Stage",
+        "type": "string"
+      }
+    },
+    "required": [
+      "stage"
+    ],
+    "title": "MessageAck",
+    "type": "object"
+  }
+}
