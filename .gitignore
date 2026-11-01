@@ -15,3 +15,4 @@ build/
 team-sync-mcp.json
 .DS_Store
 Thumbs.db
+.team-sync/

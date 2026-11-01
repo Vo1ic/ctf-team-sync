@@ -234,6 +234,14 @@ class Core:
                 result.append({**record(message), "ack_stage": receipt.stage if receipt else None})
             return result
 
+    def message(self, project_id, token, message_id):
+        with self.context(project_id, token) as (db, _, actor):
+            message = self.get(db, m.Message, project_id, message_id)
+            if message.recipient_id not in (None, actor.id):
+                fail(404, "not_found", "Message not found")
+            receipt = db.get(m.Receipt, (project_id, message.id, actor.id))
+            return {**record(message), "ack_stage": receipt.stage if receipt else None}
+
     def execute(self, project_id, token, operation, arguments, resource_id, key):
         handlers: dict[str, tuple[type[s.Input], Callable, set]] = {
             "challenge.create": (s.ChallengeCreate, self.create_challenge, WRITE_ROLES),

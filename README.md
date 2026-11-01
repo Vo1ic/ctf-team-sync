@@ -12,8 +12,9 @@ exchange messages, track flags, and share files. A self-hosted API keeps the sta
 the web interface and a portable MCP bridge use the same domain operations.
 
 **Status:** early development, version 0.1.0. The web interface is currently in Ukrainian.
-Automatic delivery into an active agent session still needs host-specific adapters;
-the current MCP bridge reads an inbox or waits for events cooperatively.
+The Codex hook adapter supplies incoming context at lifecycle checkpoints using a
+durable local receiver. It does not wake idle sessions. Other hosts can use the
+MCP inbox/event tools or add an adapter for their own lifecycle contract.
 
 ![Team Sync dashboard showing tasks, findings, and team activity](docs/assets/overview.png)
 
@@ -31,6 +32,7 @@ the current MCP bridge reads an inbox or waits for events cooperatively.
 - **Immutable artifacts:** explicit file publishing, stable IDs, and SHA-256 verification.
 - **Web interface:** shared state and live updates, including access management and MCP configuration export.
 - **Portable MCP bridge:** a local stdio process connects an agent to the team's remote API.
+- **Codex context delivery:** a separate event receiver caches updates for lifecycle hooks, with resumable cursors and explicit processing receipts.
 
 ## Architecture
 
@@ -86,6 +88,16 @@ Compose binds the API to loopback and does not publish PostgreSQL. For team acce
 put the server behind a TLS reverse proxy; browser file verification needs HTTPS
 or localhost.
 
+For source editing, use the development override with the same database and files:
+
+```sh
+docker compose -f compose.yaml -f compose.dev.yaml up --build -d
+```
+
+Python changes trigger server reload. HTML/CSS/JS changes appear after refreshing
+the browser; they do not need an image rebuild. Rebuild after dependency changes.
+Return to the normal image with `docker compose up --build -d`.
+
 ## Connect an agent
 
 Create a separate agent identity in **Команда** in the web interface, or through
@@ -118,6 +130,10 @@ point to the same server, while each independent agent uses its own credential.
 
 Available tools: `bootstrap`, `list_items`, `command_contracts`, `command`, `inbox`,
 `wait_events`, `publish_artifact`, and `fetch_artifact`.
+
+For context delivery without agent-initiated polling, see [Agent adapters](docs/ADAPTERS.md).
+The receiver runs with `uv run team-sync-agent watch`; `codex-config` prints hook
+configuration for review and merging, without modifying existing Codex settings.
 
 ## Development
 
@@ -160,13 +176,14 @@ integrity, two independent MCP processes, and multiple browser sessions.
 ## Documentation and contributing
 
 - [Contributing](CONTRIBUTING.md)
+- [Agent delivery adapters](docs/ADAPTERS.md)
 - [Machine-readable contracts](contracts/)
 - [Architecture and invariants — Ukrainian](docs/ARCHITECTURE.md)
 - [API protocol — Ukrainian](docs/PROTOCOL.md)
 - [Web interface guide — Ukrainian](docs/WEB.md)
 - [Validation record — Ukrainian](docs/VALIDATION.md)
 
-Next priorities are real CLI/IDE delivery adapters, testing across physical devices,
+Next priorities are real host acceptance tests, more CLI/IDE adapters, testing across physical devices,
 task dependencies, and CTF platform integrations. The current release has no
 automatic flag submission, folder mirroring, or agent runtime injection.
 

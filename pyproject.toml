@@ -23,6 +23,7 @@ Issues = "https://github.com/Vo1ic/ctf-team-sync/issues"
 [project.scripts]
 team-sync-mcp = "team_sync.mcp:main"
 team-sync-contracts = "team_sync.contracts:main"
+team-sync-agent = "team_sync.agent:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

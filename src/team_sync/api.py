@@ -148,6 +148,10 @@ def create_app(settings: Settings | None = None):
     ):
         return core.events(project_id, token, after, limit)
 
+    @app.get("/api/v1/projects/{project_id}/messages/{message_id}")
+    def message(project_id: s.ID, message_id: s.ID, token: Token):
+        return core.message(project_id, token, message_id)
+
     async def wait_batch(request, project_id, token, after, timeout):
         deadline = asyncio.get_running_loop().time() + timeout
         while True:

@@ -61,6 +61,8 @@ coordinator; сервер сам не виконує локальний checker 
   колекції: actors, challenges, tasks, findings, flags, verifications, submissions, artifacts.
 - `GET /projects/{project}/inbox?offset=0&limit=100` — доступні повідомлення й
   власний ack_stage. Читання не змінює стан.
+- `GET /projects/{project}/messages/{message}` — одне повідомлення, доступне цьому
+  отримувачу (або broadcast), із власним ack_stage. Чужий адресат отримує 404.
 - Максимальний розмір сторінки — 500. Читати наступні сторінки потрібно до
   неповної сторінки. Пагінація не є довготривалим snapshot; зміни слід узгоджувати
   через event replay за стабільними UUID.
