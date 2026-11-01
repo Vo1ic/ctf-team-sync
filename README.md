@@ -197,6 +197,7 @@ integrity, two independent MCP processes, and multiple browser sessions.
 - [Architecture and invariants — Ukrainian](docs/ARCHITECTURE.md)
 - [API protocol — Ukrainian](docs/PROTOCOL.md)
 - [Web interface guide — Ukrainian](docs/WEB.md)
+- [Populated demo and simulated live activity — Ukrainian](docs/DEMO.md)
 - [Validation record — Ukrainian](docs/VALIDATION.md)
 
 Next priorities are native Codex CLI hook acceptance, more CLI/IDE adapters, testing across physical devices,
