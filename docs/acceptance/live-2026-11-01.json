@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-01",
+  "project_id": "81cd4a0e-8f79-4eb0-8bdd-1ea67228800c",
+  "scope": "Actual Claude Code CLI plus two actual Codex collaboration subagents, one physical Linux host, separate identities and workspaces",
+  "participants": [
+    {
+      "host": "Codex collaboration subagent",
+      "role": "coordinator",
+      "transport": "stdio MCP"
+    },
+    {
+      "host": "Claude Code",
+      "version": "2.1.252",
+      "model": "claude-sonnet-5",
+      "role": "worker",
+      "transport": "stdio MCP and lifecycle hooks"
+    },
+    {
+      "host": "Codex collaboration subagent",
+      "role": "observer auditor",
+      "transport": "HTTP"
+    }
+  ],
+  "native_codex_cli_hook_acceptance": false,
+  "claude_invocations": 2,
+  "assertions": {
+    "coordinator_mcp_checks_passed": true,
+    "independent_codex_http_auditor_passed": true,
+    "claude_session_start_hook_delivered": true,
+    "claude_initial_hook_evidence_before_inbox": true,
+    "active_probe_absent_from_retry_session_start": true,
+    "active_probe_delivered_at_pre_tool_use": true,
+    "active_probe_evidence_before_inbox": true,
+    "initial_session_stopped_on_tool_permission": true,
+    "server_task_done_by_claude": true,
+    "server_flag_confirmed": true,
+    "server_verification_local_checker_by_coordinator": true,
+    "server_initial_hook_finding": true,
+    "server_active_hook_finding": true,
+    "server_reverse_confirmation_evidence": true,
+    "same_task_resumed_after_restart": true,
+    "assignment_explicitly_processed": true,
+    "reverse_confirmation_explicitly_processed": true,
+    "active_probe_explicitly_processed": true,
+    "claude_process_completed": true,
+    "claude_final_result_success": true
+  },
+  "success": true,
+  "resources": {
+    "challenge_id": "99b23dfa-f6c4-483c-bcc8-5503af724a36",
+    "task_id": "5dde4e6b-0363-47d2-9c19-49d59df49b39",
+    "artifact_id": "e0a12afb-a4d6-44d4-aadf-fbb67b1c275b",
+    "flag_id": "57c5b5df-00e4-4879-a754-64cc100cebd3"
+  },
+  "limitations": [
+    "No physical multi-device run",
+    "No native Codex CLI hook trust/model run",
+    "No idle-session wake-up or running-tool interruption",
+    "No external platform submission"
+  ]
+}

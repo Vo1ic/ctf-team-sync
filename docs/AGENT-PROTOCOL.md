@@ -122,8 +122,11 @@ comes from the environment or the chosen local env file, never a token argument.
 
 Tests also combine Python MCP, the Node JSONL reference runtime, plain HTTP, and
 Claude-formatted hooks in one project. This validates wire interfaces and actor
-isolation. Native model-session acceptance, Windows/macOS host acceptance, and
-two physical teammate devices require separate runs.
+isolation. A separate [live acceptance run](LIVE-ACCEPTANCE.md) passed with the
+actual Claude Code CLI and two Codex collaboration subagents, including native
+Claude hook delivery and independent verification. Native Codex CLI hooks,
+Windows/macOS host acceptance, and two physical teammate devices require
+separate runs.
 
 Sources: [JSON-RPC](https://www.jsonrpc.org/specification),
 [Claude Code hooks](https://code.claude.com/docs/en/hooks),

@@ -118,8 +118,14 @@ real HTTP server and PostgreSQL, including reconnect/restart behavior, lost rece
 responses, private message filtering, bounded context, parallel cursors, revocation,
 and explicit processing. Hook output follows the published Codex contract.
 
-An actual trusted Codex model session and two physical teammate devices still
-need a manual acceptance run. Tests do not spend model tokens or inject messages
-into the user's existing chat. Other hosts can use JSONL with explicit context
-acknowledgements, plain HTTP, or a formatter for their lifecycle contract. The
-Claude native binary has not been exercised as a model session in this environment.
+The separate [live acceptance run](LIVE-ACCEPTANCE.md) exercised Claude Code
+2.1.252 with real model inference, MCP, SessionStart delivery, and PreToolUse
+delivery after the session initialized. Two actual Codex collaboration subagents
+coordinated and independently audited the workflow through MCP and plain HTTP.
+The worker resumed the same task after a process restart and explicitly processed
+the coordinator's reverse confirmation.
+
+Native Codex CLI hook trust/model acceptance and two physical teammate devices
+still need separate runs. Ordinary automated tests do not spend model tokens or
+inject messages into the user's existing chat. Other hosts can use JSONL with
+explicit context acknowledgements, plain HTTP, or their lifecycle formatter.

@@ -192,13 +192,14 @@ integrity, two independent MCP processes, and multiple browser sessions.
 - [Contributing](CONTRIBUTING.md)
 - [Agent delivery adapters](docs/ADAPTERS.md)
 - [Host-independent protocol and network acceptance](docs/AGENT-PROTOCOL.md)
+- [Live Claude Code and Codex acceptance — Ukrainian](docs/LIVE-ACCEPTANCE.md)
 - [Machine-readable contracts](contracts/)
 - [Architecture and invariants — Ukrainian](docs/ARCHITECTURE.md)
 - [API protocol — Ukrainian](docs/PROTOCOL.md)
 - [Web interface guide — Ukrainian](docs/WEB.md)
 - [Validation record — Ukrainian](docs/VALIDATION.md)
 
-Next priorities are real host acceptance tests, more CLI/IDE adapters, testing across physical devices,
+Next priorities are native Codex CLI hook acceptance, more CLI/IDE adapters, testing across physical devices,
 task dependencies, and CTF platform integrations. The current release has no
 automatic flag submission, folder mirroring, or universal idle-session wake-up.
 
