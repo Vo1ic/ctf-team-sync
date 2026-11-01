@@ -10,6 +10,11 @@ ID = Annotated[
 ]
 Title = Annotated[str, Field(min_length=1, max_length=200, pattern=r"\S")]
 Body = Annotated[str, Field(min_length=1, max_length=100_000, pattern=r"\S")]
+CommandKey = Annotated[str, Field(min_length=1, max_length=128)]
+Version = Annotated[int, Field(ge=1)]
+LeaseSeconds = Annotated[int, Field(ge=10, le=3600)]
+ContextLimit = Annotated[int, Field(ge=1, le=20)]
+ContextBudget = Annotated[int, Field(ge=4000, le=32000)]
 
 
 class Input(BaseModel):
@@ -58,6 +63,11 @@ class Lease(Input):
 class Complete(Input):
     expected_version: int = Field(ge=1)
     result: Body
+
+
+class Release(Input):
+    expected_version: int = Field(ge=1)
+    reason: Body
 
 
 class FindingCreate(Input):
@@ -118,6 +128,7 @@ class AgentAction(Input):
         "task.claim",
         "task.renew",
         "task.complete",
+        "task.release",
         "finding.create",
         "flag.create",
         "flag.verify",
@@ -127,7 +138,7 @@ class AgentAction(Input):
     ]
     resource_id: ID | None = None
     arguments: dict = Field(default_factory=dict)
-    idempotency_key: Annotated[str, Field(min_length=1, max_length=128)]
+    idempotency_key: CommandKey
 
     @model_validator(mode="after")
     def require_resource(self):
@@ -137,6 +148,7 @@ class AgentAction(Input):
                 "task.claim",
                 "task.renew",
                 "task.complete",
+                "task.release",
                 "flag.verify",
                 "submission.create",
                 "message.ack",
@@ -145,3 +157,31 @@ class AgentAction(Input):
         ):
             raise ValueError("resource_id is required for this operation")
         return self
+
+
+ResourceCollection = Literal[
+    "projects",
+    "actors",
+    "challenges",
+    "tasks",
+    "findings",
+    "flags",
+    "verifications",
+    "submissions",
+    "artifacts",
+    "messages",
+]
+
+
+class WorkspaceQuery(Input):
+    challenge_id: ID | None = None
+    task_id: ID | None = None
+    limit: int = Field(default=5, ge=1, le=20)
+    max_chars: int = Field(default=12000, ge=4000, le=32000)
+
+
+class SearchQuery(Input):
+    query: Annotated[str, Field(min_length=1, max_length=200, pattern=r"\S")]
+    collection: ResourceCollection | None = None
+    offset: int = Field(default=0, ge=0, le=1000)
+    limit: int = Field(default=20, ge=1, le=50)

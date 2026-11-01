@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from team_sync.connection import load_connection
 from team_sync.schemas import EventEnvelope
 
 
@@ -34,8 +35,9 @@ class AgentSettings:
     state_path: Path
 
     @classmethod
-    def from_env(cls, state_path=None):
-        url = os.environ["TEAM_SYNC_URL"].rstrip("/")
+    def from_env(cls, state_path=None, access_file=None):
+        connection = load_connection(access_file)
+        url = connection["url"]
         parsed = urlsplit(url)
         if (
             parsed.scheme not in {"http", "https"}
@@ -46,8 +48,8 @@ class AgentSettings:
             or parsed.fragment
         ):
             raise DeliveryError("TEAM_SYNC_URL must be an HTTP(S) URL without credentials or query")
-        project = str(UUID(os.environ["TEAM_SYNC_PROJECT_ID"]))
-        token = os.environ["TEAM_SYNC_TOKEN"].strip()
+        project = str(UUID(connection["project_id"]))
+        token = connection["token"]
         if not token:
             raise DeliveryError("TEAM_SYNC_TOKEN must not be empty")
         fingerprint = hashlib.sha256(json.dumps([url, project, token]).encode()).hexdigest()

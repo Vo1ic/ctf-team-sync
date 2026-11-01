@@ -15,8 +15,8 @@ HOOK_EVENTS = HOOK_HOSTS["codex"].events
 CAPABILITIES = capabilities("codex")
 
 
-def codex_config(state_path=None):
-    return HOOK_HOSTS["codex"].config(state_path)
+def codex_config(state_path=None, access_file=None):
+    return HOOK_HOSTS["codex"].config(state_path, access_file)
 
 
 def render_context(contexts):
@@ -48,7 +48,7 @@ def run_hook(args):
             return 0
         if not isinstance(session, str) or not session or len(session) > 200:
             raise DeliveryError("Hook input has no valid session identity")
-        settings = AgentSettings.from_env(args.state)
+        settings = AgentSettings.from_env(args.state, getattr(args, "access_file", None))
         if not settings.state_path.exists():
             print("{}", flush=True)
             return 0
@@ -113,6 +113,9 @@ def watch(args, settings, spool):
 def parser():
     result = argparse.ArgumentParser(description="Durable delivery for Team Sync agents")
     result.add_argument(
+        "--access-file", help="Private connection JSON; no environment export needed"
+    )
+    result.add_argument(
         "--state", help="Private local SQLite cache path; default is identity-scoped"
     )
     commands = result.add_subparsers(dest="command", required=True)
@@ -153,16 +156,16 @@ def main():
         print(json.dumps(capabilities(args.host), indent=2))
         return 0
     if args.command == "codex-config":
-        print(json.dumps(codex_config(args.state), indent=2))
+        print(json.dumps(codex_config(args.state, args.access_file), indent=2))
         return 0
     if args.command == "hook-config":
-        print(json.dumps(HOOK_HOSTS[args.host].config(args.state), indent=2))
+        print(json.dumps(HOOK_HOSTS[args.host].config(args.state, args.access_file), indent=2))
         return 0
     if args.command == "hook":
         return run_hook(args)
     spool = None
     try:
-        settings = AgentSettings.from_env(args.state)
+        settings = AgentSettings.from_env(args.state, args.access_file)
         spool = Spool(settings)
         if args.command == "bridge":
             from team_sync.jsonl_bridge import JSONLBridge

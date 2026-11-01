@@ -63,8 +63,8 @@ Owner видає окремий actor token для кожного одночас
 {
   "mcpServers": {
     "team-sync": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/team-sync", "team-sync-mcp"],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.2.0", "team-sync-mcp"],
       "env": {
         "TEAM_SYNC_URL": "https://team-sync.example.org",
         "TEAM_SYNC_PROJECT_ID": "<project-uuid>",
@@ -75,11 +75,14 @@ Owner видає окремий actor token для кожного одночас
 }
 ```
 
-Обгортка конфігурації залежить від host. Локальний checkout містить лише код
-bridge; всі учасники вказують URL одного сервера. На Windows вказати свій шлях.
+Обгортка залежить від host; uvx має бути доступний клієнту через PATH. Checkout
+не потрібен для автоматичного запуску. Всі учасники вказують URL одного сервера.
+Приватний файл доступу можна передати через TEAM_SYNC_ACCESS_FILE.
 
-Інструменти: `bootstrap`, `list_items`, `command_contracts`, `command`, `inbox`,
-`wait_events`, `publish_artifact`, `fetch_artifact`.
+Починайте з `get_context`: власні роботи, leases, повідомлення, знання команди.
+Далі — `search`, `get_resource`, `update_task`, `report_finding`, `send_message`,
+`acknowledge_message`, `outbox`. Старі інструменти збережено.
+[Повний робочий цикл агента](docs/AGENT-WORKFLOW.md).
 
 Власні агенти без MCP/hooks можуть запускати `uv run team-sync-agent bridge`.
 JSONL-профіль узгоджує версію, приймає довільні назви runtime/provider/model,
@@ -104,8 +107,9 @@ CTF зберігається у приватній, gitignored директор�
 через `uv run python scripts/demo.py seed --env-file .env`. Є також скінченне
 відтворення змін у процесі роботи та відкриття вже підключеного браузера.
 
-Власник може створювати identities у розділі **Команда** та одразу завантажувати
-MCP-конфігурацію з виданим токеном. Шлях до checkout учасник замінює на власний.
+У **Підключеннях** є окремі сценарії для людини та агента. Людині достатньо
+посилання або файла, без акаунта, email і пароля; браузер пам’ятає CTF 7 днів.
+Агент отримує готову MCP-конфігурацію, файл доступу та стартову інструкцію.
 
 ## Розробка й перевірка
 

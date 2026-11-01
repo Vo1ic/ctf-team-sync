@@ -24,12 +24,18 @@ The application's runtime can implement scheduling if it has that capability.
 `capabilities --host generic`, `--host codex`, and `--host claude-code` describe the
 different contracts, not proof that a model is running.
 
+For the compact workspace, full resource lookup, search, typed MCP actions,
+task handoffs, and sent-message receipts, start with the
+[agent workflow](AGENT-WORKFLOW.md). These read views use the same domain state
+and never acknowledge or mutate it implicitly.
+
 ## JSONL bridge v1
 
 Set the usual project URL, project ID, and actor token in the environment, then run:
 
 ```sh
 uv run team-sync-agent bridge
+uv run team-sync-agent --access-file /private/team-sync-access.json bridge
 ```
 
 Each line contains a JSON-RPC 2.0 request or batch of up to 50 requests. Replies
@@ -56,6 +62,10 @@ replace the authenticated actor. Unsupported versions fail before domain actions
 | `commands/execute` | Existing AgentAction envelope | Execute the API command with its idempotency key |
 | `collections/list` | collection, offset?, limit? | Read a paginated collection |
 | `messages/inbox` | offset?, limit? | Read messages without changing processing state |
+| `messages/outbox` | offset?, limit? | Read your own sent messages and recipient receipts |
+| `workspace/context` | task_id?, challenge_id?, limit?, max_chars? | Bounded current working state, separate from durable delivery packets |
+| `resources/get` | collection, resource_id, offset?, limit? | Full current resource and paginated related evidence |
+| `resources/search` | query, collection?, offset?, limit? | Search shared knowledge and your inbox |
 
 Context defaults to 12 items and a 6,000-character JSON items budget. A host can
 request 1..50 items and 1,024..20,000 characters to fit its own model. Pending

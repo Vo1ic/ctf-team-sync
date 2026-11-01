@@ -365,7 +365,7 @@ def test_emission_bookkeeping_failure_keeps_valid_json_and_replay(settings, monk
     spool = Spool(settings)
     item = event(settings, 1)
     spool.ingest([item], {1: {"kind": "change", "event": item}}, [], str(uuid4()))
-    monkeypatch.setattr(AgentSettings, "from_env", lambda state: settings)
+    monkeypatch.setattr(AgentSettings, "from_env", lambda state, access_file=None: settings)
     monkeypatch.setattr(
         sys,
         "stdin",
@@ -400,7 +400,7 @@ def test_broken_hook_stdout_does_not_advance_cursor(settings, monkeypatch):
             pass
 
     with monkeypatch.context() as patch:
-        patch.setattr(AgentSettings, "from_env", lambda state: settings)
+        patch.setattr(AgentSettings, "from_env", lambda state, access_file=None: settings)
         patch.setattr(
             sys,
             "stdin",

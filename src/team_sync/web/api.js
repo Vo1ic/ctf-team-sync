@@ -53,6 +53,8 @@ function errorMessage(body, status) {
     scope_mismatch:
       "Завдання знахідки не збігається із завданням вибраної роботи.",
     invalid_cursor: "Курсор не відповідає журналу CTF. Підключіться повторно.",
+    browser_origin_required:
+      "Відкрийте Team Sync з адреси цього сервера й повторіть дію.",
   };
   if (labels[body?.code]) return labels[body.code];
   if (Array.isArray(body?.detail)) {
@@ -73,6 +75,7 @@ export class ApiClient {
   ) {
     this.projectId = projectId;
     this.token = token;
+    this.actorId = null;
     this.fetcher = fetcher;
     this.controller = new AbortController();
     this.pending = new Map();
@@ -98,9 +101,13 @@ export class ApiClient {
       response = await this.fetcher(path, {
         method,
         cache: "no-store",
+        credentials: "same-origin",
         signal: abort.signal,
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          ...(this.token
+            ? { Authorization: `Bearer ${this.token}` }
+            : { "X-Team-Sync-Browser": "1" }),
+          ...(this.actorId ? { "X-Team-Sync-Actor": this.actorId } : {}),
           ...(body !== undefined && !raw
             ? { "Content-Type": "application/json" }
             : {}),

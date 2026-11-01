@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { accessLink } from "../../src/team_sync/web/access.js";
 
 async function project(request, options = {}) {
   const response = await request.post("/api/v1/projects", {
@@ -57,12 +58,9 @@ async function command(
 }
 
 async function join(page, ctf, token = ctf.token) {
-  await page.goto("/");
-  await page
-    .getByLabel("Ідентифікатор CTF", { exact: true })
-    .fill(ctf.project.id);
-  await page.getByLabel("Токен доступу", { exact: true }).fill(token);
-  await page.getByRole("button", { name: "Підключитися", exact: true }).click();
+  const hash = new URL(accessLink("http://localhost", ctf.project.id, token))
+    .hash;
+  await page.goto(`/${hash}`);
   await expect(
     page.getByRole("heading", { name: ctf.project.name, exact: true }),
   ).toBeVisible();
@@ -106,7 +104,7 @@ test("create a CTF and issue an agent credential through the web", async ({
     .getByLabel("Особистий токен", { exact: true })
     .inputValue();
   expect(ownerToken.length).toBeGreaterThan(30);
-  await page.getByRole("button", { name: "Я зберіг токен" }).click();
+  await page.getByRole("button", { name: "Готово" }).click();
   await section(page, "Завдання CTF");
   await page
     .getByRole("button", { name: "Додати завдання", exact: true })
@@ -123,7 +121,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   ).toBeVisible();
   await section(page, "Команда");
   await page
-    .getByRole("button", { name: "Додати учасника", exact: true })
+    .getByRole("button", { name: "Підключити агента", exact: true })
     .click();
   await page.getByLabel("Ім’я / назва агента").fill("Web Agent");
   await page.getByLabel("Спеціалізації").fill("web, reverse");
@@ -141,7 +139,28 @@ test("create a CTF and issue an agent credential through the web", async ({
   const download = await downloadPromise;
   const config = JSON.parse(await readFile(await download.path(), "utf8"));
   expect(config.mcpServers["team-sync"].env.TEAM_SYNC_TOKEN).toBe(agentToken);
-  await page.getByRole("button", { name: "Я зберіг токен" }).click();
+  expect(config.mcpServers["team-sync"].command).toBe("uvx");
+  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.2.0");
+  await page.getByLabel("Запуск MCP", { exact: true }).selectOption("local");
+  await page
+    .getByLabel("Репозиторій на пристрої агента")
+    .fill("C:\\CTF\\team-sync");
+  const localPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Зберегти MCP-конфігурацію" }).click();
+  const local = JSON.parse(
+    await readFile(await (await localPromise).path(), "utf8"),
+  );
+  expect(local.mcpServers["team-sync"].command).toBe("uv");
+  expect(local.mcpServers["team-sync"].args[2]).toBe("C:\\CTF\\team-sync");
+  const promptPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Зберегти стартову інструкцію" })
+    .click();
+  const prompt = await readFile(await (await promptPromise).path(), "utf8");
+  expect(prompt).toContain("get_context");
+  expect(prompt).toContain("update_task");
+  expect(prompt).not.toContain(agentToken);
+  await page.getByRole("button", { name: "Готово" }).click();
   await expect(
     page.getByRole("heading", { name: "Web Agent", exact: true }),
   ).toBeVisible();
@@ -152,7 +171,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   expect(storage).not.toContain(agentToken);
   await page.reload();
   await expect(
-    page.getByRole("button", { name: "Підключитися", exact: true }),
+    page.getByRole("heading", { name: "Browser-created CTF", exact: true }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -389,7 +408,7 @@ test("received credentials remain visible when refreshing the workspace fails", 
     route.abort("failed"),
   );
   await page
-    .getByRole("button", { name: "Додати учасника", exact: true })
+    .getByRole("button", { name: "Підключити агента", exact: true })
     .click();
   await page.getByLabel("Ім’я / назва агента").fill("Preserve credential");
   await page
@@ -422,7 +441,7 @@ test("revoking access disconnects the browser and clears shared content", async 
   );
   expect(response.ok()).toBeTruthy();
   await expect(
-    page.getByRole("button", { name: "Підключитися", exact: true }),
+    page.getByRole("button", { name: "Відкрити файл доступу", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByLabel("Токен доступу", { exact: true })).toHaveValue(
@@ -541,4 +560,215 @@ test("desktop overview presents actual shared project state", async ({
     animations: "disabled",
   });
   expect(errors).toEqual([]);
+});
+
+test("a human opens an access file without an account, reloads, and disconnects", async ({
+  page,
+  request,
+  browser,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  await section(page, "Підключення");
+  await page
+    .getByRole("button", { name: "Запросити людину", exact: true })
+    .click();
+  await page
+    .getByLabel("Ім’я / псевдонім", { exact: true })
+    .fill("Human reviewer");
+  await page.getByLabel("Роль", { exact: true }).selectOption("observer");
+  await page
+    .getByRole("button", { name: "Видати доступ", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Доступ для Human reviewer",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Зберегти файл доступу", exact: true })
+    .click();
+  const file = JSON.parse(
+    await readFile(await (await downloadPromise).path(), "utf8"),
+  );
+  expect(file.actor.kind).toBe("human");
+  expect(file.actor.role).toBe("observer");
+  const reviewerContext = await browser.newContext();
+  const reviewer = await reviewerContext.newPage();
+  await reviewer.goto(new URL(page.url()).origin);
+  await reviewer.getByLabel("Файл доступу Team Sync").setInputFiles({
+    name: "access.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(file)),
+  });
+  await expect(
+    reviewer.getByRole("heading", { name: ctf.project.name, exact: true }),
+  ).toBeVisible();
+  await expect(reviewer.locator(".current-actor")).toContainText(
+    "Human reviewer",
+  );
+  const stored = await reviewer.evaluate(() =>
+    JSON.stringify({ ...localStorage, ...sessionStorage }),
+  );
+  expect(stored).not.toContain(file.token);
+  expect(await reviewer.evaluate(() => document.cookie)).not.toContain(
+    file.token,
+  );
+  await reviewer.reload();
+  await expect(
+    reviewer.getByRole("heading", { name: ctf.project.name, exact: true }),
+  ).toBeVisible();
+  await section(reviewer, "Підключення");
+  await expect(
+    reviewer.getByRole("button", { name: "Запросити людину", exact: true }),
+  ).toHaveCount(0);
+  await reviewer
+    .getByRole("button", { name: "Від’єднатися", exact: true })
+    .click();
+  await expect(
+    reviewer.getByRole("button", {
+      name: "Відкрити файл доступу",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await reviewer.reload();
+  await expect(
+    reviewer.getByRole("button", {
+      name: "Відкрити файл доступу",
+      exact: true,
+    }),
+  ).toBeVisible();
+  const response = await reviewer.request.get(
+    `/api/v1/projects/${ctf.project.id}/snapshot`,
+  );
+  expect(response.status()).toBe(401);
+  await reviewerContext.close();
+});
+
+test("two identities in one browser keep their own actor after reload", async ({
+  page,
+  context,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  await join(page, ctf);
+  const worker = await context.newPage();
+  await join(worker, ctf, agent.token);
+  await page.reload();
+  await worker.reload();
+  await expect(page.locator(".current-actor")).toContainText("Captain");
+  await expect(worker.locator(".current-actor")).toContainText("Agent Alpha");
+  await page.getByRole("button", { name: "Від’єднатися", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Відкрити файл доступу", exact: true }),
+  ).toBeVisible();
+  await worker.reload();
+  await expect(worker.locator(".current-actor")).toContainText("Agent Alpha");
+  expect(worker.url()).not.toContain("join=");
+  expect(await worker.evaluate(() => document.cookie)).not.toContain(
+    agent.token,
+  );
+  await worker.close();
+});
+
+test("connection import rejects another server before authenticating", async ({
+  page,
+}) => {
+  await page.goto("/");
+  let attempts = 0;
+  page.on("request", (r) => {
+    if (r.url().includes("browser-session")) attempts++;
+  });
+  await page.getByLabel("Файл доступу Team Sync").setInputFiles({
+    name: "foreign.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        url: "https://foreign.invalid",
+        project_id: randomUUID(),
+        token: "synthetic-connection-credential",
+      }),
+    ),
+  });
+  await expect(page.getByRole("alert")).toContainText("іншому серверу");
+  expect(attempts).toBe(0);
+});
+
+test("a sender sees recipient receipts in the outbox without exposing other conversations", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const peer = await enroll(request, ctf);
+  await join(page, ctf);
+  await section(page, "Повідомлення");
+  await page.getByRole("button", { name: "Написати", exact: true }).click();
+  await page.getByLabel("Кому", { exact: true }).selectOption(peer.actor.id);
+  await page
+    .getByLabel("Повідомлення", { exact: true })
+    .fill("Review this synthetic evidence");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Надіслати", exact: true })
+    .click();
+  const card = page
+    .locator(".message-card")
+    .filter({ hasText: "Review this synthetic evidence" });
+  await expect(card).toContainText("Чекає підтвердження адресата");
+  const inbox = await request.get(`/api/v1/projects/${ctf.project.id}/inbox`, {
+    headers: { Authorization: `Bearer ${peer.token}` },
+  });
+  const message = (await inbox.json()).items[0];
+  await command(
+    request,
+    ctf,
+    "message.ack",
+    { stage: "processed" },
+    message.id,
+    peer.token,
+  );
+  await expect(card).toContainText("Адресат опрацював");
+  await expect(
+    card.getByRole("button", { name: "Опрацьовано", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("a task can be handed off with preserved context and reclaimed", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const task = await command(request, ctf, "task.create", {
+    title: "Recover after handoff",
+  });
+  await join(page, ctf);
+  await section(page, "Роботи");
+  await page.getByRole("button", { name: "Взяти роботу", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Recover after handoff", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Передати роботу далі", exact: true })
+    .click();
+  await page
+    .getByLabel("Контекст для наступного виконавця")
+    .fill("Header parsed. Continue by checking timezone.");
+  await page
+    .getByRole("button", { name: "Звільнити роботу", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Взяти роботу", exact: true }),
+  ).toBeVisible();
+  await section(page, "Знахідки");
+  await expect(page.locator(".finding-card")).toContainText(
+    "Header parsed. Continue by checking timezone.",
+  );
+  const detail = await request.get(
+    `/api/v1/projects/${ctf.project.id}/resources/tasks/${task.id}`,
+    { headers: { Authorization: `Bearer ${ctf.token}` } },
+  );
+  expect((await detail.json()).item.status).toBe("open");
 });

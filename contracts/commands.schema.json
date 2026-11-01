@@ -143,6 +143,29 @@
     "title": "Complete",
     "type": "object"
   },
+  "task.release": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "reason": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "reason"
+    ],
+    "title": "Release",
+    "type": "object"
+  },
   "finding.create": {
     "additionalProperties": false,
     "properties": {

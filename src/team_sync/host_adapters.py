@@ -12,10 +12,12 @@ class HookHost:
     name: str
     events: tuple[str, ...] = ("SessionStart", "UserPromptSubmit", "PreToolUse")
 
-    def config(self, state_path=None):
+    def config(self, state_path=None, access_file=None):
         argv = [Path(sys.executable).as_posix(), "-m", "team_sync.agent"]
         if state_path:
             argv.extend(["--state", Path(state_path).expanduser().resolve().as_posix()])
+        if access_file:
+            argv.extend(["--access-file", Path(access_file).expanduser().resolve().as_posix()])
         argv.extend(["hook", "--host", self.name])
         handler = {
             "type": "command",
@@ -46,6 +48,10 @@ def capabilities(host="generic"):
         "protocol_versions": [1],
         "durable_event_cache": True,
         "requires_mcp": False,
+        "workspace_context": True,
+        "resource_search": True,
+        "task_handoff": "explicit_release_with_reason",
+        "connection_file": True,
         "automatic_context_delivery": "caller_controlled"
         if host == "generic"
         else "lifecycle_checkpoints",

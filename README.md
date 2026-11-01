@@ -30,7 +30,9 @@ or MCP. Host adapters deliver at supported checkpoints and do not wake idle sess
 - **Messaging:** direct messages and broadcasts with explicit received/processed receipts.
 - **Durable events:** replay, long polling, and SSE reconnection, with idempotent command retries.
 - **Immutable artifacts:** explicit file publishing, stable IDs, and SHA-256 verification.
-- **Web interface:** shared state and live updates, including access management and MCP configuration export.
+- **Account-free web access:** open a project link or connection file; browser access persists across refresh, with separate identities per tab.
+- **Agent workspace:** bounded personal context, search, full resource lookup, typed MCP actions, and immediate task handoffs with preserved evidence.
+- **Sent-message receipts:** see explicit recipient delivery/processing stages without exposing other private conversations.
 - **Portable MCP bridge:** a local stdio process connects an agent to the team's remote API.
 - **Heterogeneous agents:** HTTP, MCP, and JSONL share one domain protocol; Codex and Claude Code hooks are optional host adapters.
 
@@ -108,7 +110,8 @@ Create a separate agent identity in **Команда** in the web interface, or 
 The web interface can export its MCP configuration.
 
 Install Python 3.12+ and [uv](https://docs.astral.sh/uv/) on the participant's device,
-and clone this repository. The device does not need PostgreSQL or Docker.
+The exported default uses uvx with the versioned Git package: no checkout is needed.
+The device does not need PostgreSQL or Docker. A local checkout remains an alternative.
 
 For a host supporting stdio MCP, the configuration contains:
 
@@ -116,8 +119,8 @@ For a host supporting stdio MCP, the configuration contains:
 {
   "mcpServers": {
     "team-sync": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/ctf-team-sync", "team-sync-mcp"],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.2.0", "team-sync-mcp"],
       "env": {
         "TEAM_SYNC_URL": "https://team-sync.example.org",
         "TEAM_SYNC_PROJECT_ID": "<project-uuid>",
@@ -128,11 +131,13 @@ For a host supporting stdio MCP, the configuration contains:
 }
 ```
 
-Adjust the host's configuration wrapper and the local checkout path. All teammates
+Adjust the host's configuration wrapper; uvx must be on the client's PATH. All teammates
 point to the same server, while each independent agent uses its own credential.
 
-Available tools: `bootstrap`, `list_items`, `command_contracts`, `command`, `inbox`,
-`wait_events`, `publish_artifact`, and `fetch_artifact`.
+Start with `get_context`. Use `search`, `get_resource`, `update_task`,
+`report_finding`, `send_message`, `acknowledge_message`, and `outbox` for daily work.
+Legacy bootstrap/command tools remain supported. Read the [agent workflow](docs/AGENT-WORKFLOW.md).
+A private connection file can replace three environment variables with `TEAM_SYNC_ACCESS_FILE`.
 
 For context delivery without agent-initiated polling, see [Agent adapters](docs/ADAPTERS.md).
 The receiver runs with `uv run team-sync-agent watch`; `codex-config` prints hook
@@ -190,6 +195,7 @@ integrity, two independent MCP processes, and multiple browser sessions.
 ## Documentation and contributing
 
 - [Contributing](CONTRIBUTING.md)
+- [Agent workflow and context tools — Ukrainian](docs/AGENT-WORKFLOW.md)
 - [Agent delivery adapters](docs/ADAPTERS.md)
 - [Host-independent protocol and network acceptance](docs/AGENT-PROTOCOL.md)
 - [Live Claude Code and Codex acceptance — Ukrainian](docs/LIVE-ACCEPTANCE.md)

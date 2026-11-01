@@ -19,6 +19,7 @@ from team_sync.core import WRITE_ROLES, Core, DomainError
 from team_sync.settings import Settings
 
 security = HTTPBearer(auto_error=False)
+BROWSER_COOKIE = "team_sync_access"
 Collection = Literal[
     "actors",
     "challenges",
@@ -31,10 +32,26 @@ Collection = Literal[
 ]
 
 
-def credential(auth: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]):
-    if auth is None:
-        raise DomainError(401, "invalid_credential", "Bearer credential required")
-    return auth.credentials
+def credential(
+    request: Request, auth: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]
+):
+    if request.headers.get("Authorization"):
+        if auth is None:
+            raise DomainError(401, "invalid_credential", "Bearer credential required")
+        return auth.credentials
+    actor_id = request.headers.get("X-Team-Sync-Actor")
+    cookie_name = f"team_sync_actor_{actor_id}" if actor_id else BROWSER_COOKIE
+    token = request.cookies.get(cookie_name) if request.path_params.get("project_id") else None
+    if token:
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            if request.headers.get("X-Team-Sync-Browser") != "1" or request.headers.get(
+                "Origin"
+            ) != str(request.base_url).rstrip("/"):
+                raise DomainError(
+                    403, "browser_origin_required", "A same-origin browser request is required"
+                )
+        return token
+    raise DomainError(401, "invalid_credential", "Project access is required")
 
 
 Token = Annotated[str, Depends(credential)]
@@ -52,7 +69,7 @@ def create_app(settings: Settings | None = None):
         yield
         core.engine.dispose()
 
-    app = FastAPI(title="CTF Team Sync", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="CTF Team Sync", version="0.2.0", lifespan=lifespan)
     app.state.core = core
 
     @app.middleware("http")
@@ -109,6 +126,64 @@ def create_app(settings: Settings | None = None):
     def snapshot(project_id: s.ID, token: Token):
         return core.snapshot(project_id, token)
 
+    @app.post("/api/v1/projects/{project_id}/browser-session")
+    def browser_session(project_id: s.ID, token: Token, request: Request):
+        with core.context(project_id, token) as (_, __, actor):
+            result = {"project_id": project_id, "actor_id": actor.id}
+        response = JSONResponse(result)
+        response.set_cookie(
+            BROWSER_COOKIE,
+            token,
+            max_age=7 * 24 * 3600,
+            path=f"/api/v1/projects/{project_id}/",
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="strict",
+        )
+        response.set_cookie(
+            f"team_sync_actor_{result['actor_id']}",
+            token,
+            max_age=7 * 24 * 3600,
+            path=f"/api/v1/projects/{project_id}/",
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="strict",
+        )
+        return response
+
+    @app.delete("/api/v1/projects/{project_id}/browser-session")
+    def forget_browser_session(project_id: s.ID, token: Token, request: Request):
+        response = JSONResponse({"disconnected": True})
+        names = [
+            name
+            for name, value in request.cookies.items()
+            if value == token and (name == BROWSER_COOKIE or name.startswith("team_sync_actor_"))
+        ]
+        for name in names:
+            response.delete_cookie(
+                name, path=f"/api/v1/projects/{project_id}/", httponly=True, samesite="strict"
+            )
+        return response
+
+    @app.get("/api/v1/projects/{project_id}/agent-context")
+    def agent_context(project_id: s.ID, token: Token, query: Annotated[s.WorkspaceQuery, Query()]):
+        return core.agent_context(project_id, token, query)
+
+    @app.get("/api/v1/projects/{project_id}/resources/{collection}/{resource_id}")
+    def resource(
+        project_id: s.ID,
+        collection: s.ResourceCollection,
+        resource_id: s.ID,
+        token: Token,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    ):
+        return core.resource(project_id, token, collection, resource_id, offset, limit)
+
+    @app.get("/api/v1/projects/{project_id}/search")
+    def search(project_id: s.ID, token: Token, query: Annotated[s.SearchQuery, Query()]):
+        return core.search(project_id, token, query)
+
     @app.get("/api/v1/projects/{project_id}/collections/{collection}")
     def listing(
         project_id: s.ID,
@@ -138,6 +213,15 @@ def create_app(settings: Settings | None = None):
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ):
         return {"items": core.inbox(project_id, token, offset, limit)}
+
+    @app.get("/api/v1/projects/{project_id}/outbox")
+    def outbox(
+        project_id: s.ID,
+        token: Token,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ):
+        return {"items": core.outbox(project_id, token, offset, limit)}
 
     @app.get("/api/v1/projects/{project_id}/events")
     def events(

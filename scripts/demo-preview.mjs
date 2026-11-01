@@ -27,9 +27,9 @@ try {
     viewport: { width: 1440, height: 1000 },
   });
   await page.goto(`${url.origin}/#project=${access.project_id}`);
-  await page.getByLabel("Ідентифікатор CTF").fill(access.project_id);
-  await page.getByLabel("Токен доступу").fill(access.token);
-  await page.getByRole("button", { name: "Підключитися", exact: true }).click();
+  await page
+    .getByLabel("Файл доступу Team Sync")
+    .setInputFiles(values["access-file"]);
   await page
     .getByRole("heading", { name: "DEMO · Nightshift CTF", exact: true })
     .waitFor();

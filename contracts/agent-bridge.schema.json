@@ -34,6 +34,7 @@
             "task.claim",
             "task.renew",
             "task.complete",
+            "task.release",
             "finding.create",
             "flag.create",
             "flag.verify",
@@ -129,6 +130,51 @@
         "name"
       ],
       "title": "ClientInfo",
+      "type": "object"
+    },
+    "GetResource": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "enum": [
+            "projects",
+            "actors",
+            "challenges",
+            "tasks",
+            "findings",
+            "flags",
+            "verifications",
+            "submissions",
+            "artifacts",
+            "messages"
+          ],
+          "title": "Collection",
+          "type": "string"
+        },
+        "resource_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection",
+        "resource_id"
+      ],
+      "title": "GetResource",
       "type": "object"
     },
     "Hello": {
@@ -242,6 +288,61 @@
       "title": "ReadContext",
       "type": "object"
     },
+    "SearchQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Query",
+          "type": "string"
+        },
+        "collection": {
+          "anyOf": [
+            {
+              "enum": [
+                "projects",
+                "actors",
+                "challenges",
+                "tasks",
+                "findings",
+                "flags",
+                "verifications",
+                "submissions",
+                "artifacts",
+                "messages"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collection"
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchQuery",
+      "type": "object"
+    },
     "Sync": {
       "additionalProperties": false,
       "properties": {
@@ -254,6 +355,53 @@
         }
       },
       "title": "Sync",
+      "type": "object"
+    },
+    "WorkspaceQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "challenge_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Challenge Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "limit": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_chars": {
+          "default": 12000,
+          "maximum": 32000,
+          "minimum": 4000,
+          "title": "Max Chars",
+          "type": "integer"
+        }
+      },
+      "title": "WorkspaceQuery",
       "type": "object"
     },
     "collections_listRequest": {
@@ -508,6 +656,48 @@
       "title": "messages_inboxRequest",
       "type": "object"
     },
+    "messages_outboxRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "messages/outbox",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/Inbox"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "messages_outboxRequest",
+      "type": "object"
+    },
     "protocol_helloRequest": {
       "additionalProperties": false,
       "properties": {
@@ -549,6 +739,132 @@
       ],
       "title": "protocol_helloRequest",
       "type": "object"
+    },
+    "resources_getRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "resources/get",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/GetResource"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "resources_getRequest",
+      "type": "object"
+    },
+    "resources_searchRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "resources/search",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/SearchQuery"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "resources_searchRequest",
+      "type": "object"
+    },
+    "workspace_contextRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "workspace/context",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/WorkspaceQuery"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "workspace_contextRequest",
+      "type": "object"
     }
   },
   "discriminator": {
@@ -559,7 +875,11 @@
       "context/read": "#/$defs/context_readRequest",
       "events/sync": "#/$defs/events_syncRequest",
       "messages/inbox": "#/$defs/messages_inboxRequest",
-      "protocol/hello": "#/$defs/protocol_helloRequest"
+      "messages/outbox": "#/$defs/messages_outboxRequest",
+      "protocol/hello": "#/$defs/protocol_helloRequest",
+      "resources/get": "#/$defs/resources_getRequest",
+      "resources/search": "#/$defs/resources_searchRequest",
+      "workspace/context": "#/$defs/workspace_contextRequest"
     },
     "propertyName": "method"
   },
@@ -584,6 +904,18 @@
     },
     {
       "$ref": "#/$defs/messages_inboxRequest"
+    },
+    {
+      "$ref": "#/$defs/messages_outboxRequest"
+    },
+    {
+      "$ref": "#/$defs/workspace_contextRequest"
+    },
+    {
+      "$ref": "#/$defs/resources_getRequest"
+    },
+    {
+      "$ref": "#/$defs/resources_searchRequest"
     }
   ]
 }

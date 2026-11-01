@@ -57,6 +57,13 @@ Run the receiver in a separate terminal:
 uv run team-sync-agent watch
 ```
 
+Alternatively download the private connection JSON from the web interface and use
+`uv run team-sync-agent --access-file /private/team-sync-access.json watch`.
+The same `--access-file` works with `bridge` and `hook-config`; the generated hook
+passes the file path and reads credentials locally. MCP supports the equivalent
+`TEAM_SYNC_ACCESS_FILE` environment setting. Explicit file values are not mixed
+with stale URL/token environment values.
+
 It reconnects with backoff after transient network failures. Invalid credentials,
 incompatible event schemas, and invalid cursors stop the process with a nonzero
 exit code. `--once --timeout 0` receives one batch for diagnostics.

@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-01",
+  "project_id": "ae74b45d-64d1-4229-8503-799d2e5c62b9",
+  "scope": "Actual Claude Code CLI over MCP, then parent Codex agent over HTTP; one physical Linux host",
+  "model": "claude-sonnet-5",
+  "model_tool_calls": 10,
+  "assertions": {
+    "native_claude_completed": true,
+    "first_tool_compact_context": true,
+    "full_evidence_read": true,
+    "search_used": true,
+    "typed_progress_and_handoff": true,
+    "released_task_open_without_waiting_for_expiry": true,
+    "handoff_preserves_marker": true,
+    "private_peer_message_preserves_marker": true,
+    "no_bulk_schema_or_collection_discovery": true,
+    "parent_codex_http_continued_same_task": true,
+    "peer_handoff_explicitly_processed": true,
+    "worker_instruction_explicitly_processed": true,
+    "sender_can_observe_processed_receipt": true
+  },
+  "success": true,
+  "task_id": "e3aa8739-70c0-4d3d-af66-06663942d997",
+  "task_completion_claimed": false
+}

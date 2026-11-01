@@ -60,6 +60,22 @@ class JSONLBridge:
             )
         if method == "messages/inbox":
             return self.receiver.request("GET", "inbox", params=params.model_dump())
+        if method == "messages/outbox":
+            return self.receiver.request("GET", "outbox", params=params.model_dump())
+        if method == "workspace/context":
+            return self.receiver.request(
+                "GET", "agent-context", params=params.model_dump(exclude_none=True)
+            )
+        if method == "resources/search":
+            return self.receiver.request(
+                "GET", "search", params=params.model_dump(exclude_none=True)
+            )
+        if method == "resources/get":
+            return self.receiver.request(
+                "GET",
+                f"resources/{params.collection}/{params.resource_id}",
+                params={"offset": params.offset, "limit": params.limit},
+            )
         raise RPCError(-32601, "Method not found")
 
     @staticmethod

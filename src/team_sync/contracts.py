@@ -12,6 +12,7 @@ def operation_schemas():
         "task.claim": s.Lease,
         "task.renew": s.Lease,
         "task.complete": s.Complete,
+        "task.release": s.Release,
         "finding.create": s.FindingCreate,
         "flag.create": s.FlagCreate,
         "flag.verify": s.FlagVerify,

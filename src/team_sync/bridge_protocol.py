@@ -6,7 +6,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, create_model
 
-from team_sync.schemas import ID, AgentAction, Input
+from team_sync.schemas import (
+    ID,
+    AgentAction,
+    Input,
+    ResourceCollection,
+    SearchQuery,
+    WorkspaceQuery,
+)
 
 Consumer = Annotated[str, Field(min_length=1, max_length=200, pattern=r"\S")]
 RequestID = Annotated[str, Field(min_length=1, max_length=128)] | StrictInt | None
@@ -61,6 +68,13 @@ class Inbox(Input):
     limit: int = Field(default=100, ge=1, le=500)
 
 
+class GetResource(Input):
+    collection: ResourceCollection
+    resource_id: ID
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=10, ge=1, le=50)
+
+
 class RPCEnvelope(Input):
     jsonrpc: Literal["2.0"]
     id: RequestID = None
@@ -76,6 +90,10 @@ METHODS = {
     "commands/execute": AgentAction,
     "collections/list": ListItems,
     "messages/inbox": Inbox,
+    "messages/outbox": Inbox,
+    "workspace/context": WorkspaceQuery,
+    "resources/get": GetResource,
+    "resources/search": SearchQuery,
 }
 
 

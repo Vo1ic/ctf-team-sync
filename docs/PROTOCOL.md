@@ -42,6 +42,7 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | task.claim | task | expected_version, lease_seconds? |
 | task.renew | task | expected_version, lease_seconds? |
 | task.complete | task | expected_version, result |
+| task.release | task | expected_version, reason |
 | finding.create | не потрібен | title, body, evidence, kind?, challenge_id?, task_id? |
 | flag.create | не потрібен | value, challenge_id?, target?, round?, expires_at? |
 | flag.verify | flag | expected_version, status, method, evidence |
@@ -50,7 +51,9 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | message.ack | message | stage |
 
 Повні аргументи та enums: `contracts/commands.schema.json` або MCP
-`command_contracts`. `flag.verify` фіксує повідомлене підтвердження від owner чи
+`command_contracts(operation)` для однієї операції. `task.release` атомарно
+зберігає handoff finding з причиною, звільняє власний чинний lease та збільшує
+версію. `flag.verify` фіксує повідомлене підтвердження від owner чи
 coordinator; сервер сам не виконує локальний checker і не звертається до платформи.
 `submission.create` лише додає звіт. Відхилення відправлення не змінює перевірку
 флага, а прийнятий звіт не підвищує її автоматично.
@@ -61,11 +64,30 @@ coordinator; сервер сам не виконує локальний checker 
   колекції: actors, challenges, tasks, findings, flags, verifications, submissions, artifacts.
 - `GET /projects/{project}/inbox?offset=0&limit=100` — доступні повідомлення й
   власний ack_stage. Читання не змінює стан.
+- `GET /projects/{project}/outbox?offset=0&limit=100` — лише власні вихідні;
+  `recipient_ack_stage` конкретного адресата, null для broadcast/відсутнього ack.
+- `GET /projects/{project}/agent-context?limit=5&max_chars=12000` — обмежений
+  робочий контекст зі scope `task_id`/`challenge_id`, totals і excerpts.
+- `GET /projects/{project}/resources/{collection}/{id}?offset=0&limit=10` —
+  повний ресурс і пагіновані пов'язані записи. Повідомлення — лише адресату.
+- `GET /projects/{project}/search?query=...&collection=...&offset=0&limit=20` —
+  literal case-insensitive пошук спільних даних і власного inbox. `%`/`_` literal.
 - `GET /projects/{project}/messages/{message}` — одне повідомлення, доступне цьому
   отримувачу (або broadcast), із власним ack_stage. Чужий адресат отримує 404.
 - Максимальний розмір сторінки — 500. Читати наступні сторінки потрібно до
   неповної сторінки. Пагінація не є довготривалим snapshot; зміни слід узгоджувати
   через event replay за стабільними UUID.
+
+## Браузер без акаунтів
+
+`POST /projects/{project}/browser-session` із Bearer перевіряє проєктний доступ
+і встановлює 7-денні HttpOnly/SameSite=Strict cookies, scoped до project path і
+identity; HTTPS також додає Secure. У відповіді тільки project_id та actor_id.
+Браузер надалі може використовувати cookie без Bearer, вибравши identity через
+`X-Team-Sync-Actor`. Cookie-мутація потребує `X-Team-Sync-Browser: 1` та Origin,
+що точно збігається з origin сервера. `DELETE browser-session` прибирає cookies
+поточного credential. Logout не відкликає actor; revoke знецінює його cookies.
+Bearer-клієнти й початкова bootstrap-ініціалізація не змінені.
 
 ## Події
 

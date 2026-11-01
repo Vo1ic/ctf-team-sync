@@ -150,6 +150,24 @@ class Core:
                 ],
             }
 
+    def agent_context(self, project_id, token, query):
+        from team_sync.workbench import workspace
+
+        with self.context(project_id, token) as (db, project, actor):
+            return workspace(self, db, project, actor, query)
+
+    def resource(self, project_id, token, collection, resource_id, offset=0, limit=10):
+        from team_sync.workbench import resource
+
+        with self.context(project_id, token) as (db, project, actor):
+            return resource(self, db, project, actor, collection, resource_id, offset, limit)
+
+    def search(self, project_id, token, query):
+        from team_sync.workbench import search
+
+        with self.context(project_id, token) as (db, project, actor):
+            return search(db, project, actor, query)
+
     def revoke(self, project_id, token, actor_id):
         with self.context(project_id, token, write=True, roles={"owner"}) as (db, project, actor):
             target = self.get(db, m.Actor, project_id, actor_id)
@@ -242,6 +260,18 @@ class Core:
             receipt = db.get(m.Receipt, (project_id, message.id, actor.id))
             return {**record(message), "ack_stage": receipt.stage if receipt else None}
 
+    def outbox(self, project_id, token, offset=0, limit=100):
+        from team_sync.workbench import sent_messages
+
+        with self.context(project_id, token) as (db, project, actor):
+            rows = db.execute(
+                sent_messages(project, actor)
+                .order_by(m.Message.created_at, m.Message.id)
+                .offset(offset)
+                .limit(limit)
+            )
+            return [{**record(message), "recipient_ack_stage": stage} for message, stage in rows]
+
     def execute(self, project_id, token, operation, arguments, resource_id, key):
         handlers: dict[str, tuple[type[s.Input], Callable, set]] = {
             "challenge.create": (s.ChallengeCreate, self.create_challenge, WRITE_ROLES),
@@ -249,6 +279,7 @@ class Core:
             "task.claim": (s.Lease, self.claim, WRITE_ROLES),
             "task.renew": (s.Lease, self.renew, WRITE_ROLES),
             "task.complete": (s.Complete, self.complete, WRITE_ROLES),
+            "task.release": (s.Release, self.release, WRITE_ROLES),
             "finding.create": (s.FindingCreate, self.create_finding, WRITE_ROLES),
             "flag.create": (s.FlagCreate, self.create_flag, WRITE_ROLES),
             "flag.verify": (s.FlagVerify, self.verify_flag, LEAD_ROLES),
@@ -338,6 +369,25 @@ class Core:
     def complete(self, db, project, actor, data, resource_id):
         task, _ = self.owned_task(db, project, actor, data, resource_id)
         task.status, task.result, task.lease_until = "done", data.result, None
+        task.version += 1
+        return task
+
+    def release(self, db, project, actor, data, resource_id):
+        task, _ = self.owned_task(db, project, actor, data, resource_id)
+        finding = self.insert(
+            db,
+            project,
+            m.Finding,
+            author_id=actor.id,
+            title=f"Handoff: {task.title}"[:200],
+            body=data.reason,
+            evidence="The assignee explicitly released a live task lease.",
+            kind="observation",
+            task_id=task.id,
+            challenge_id=task.challenge_id,
+        )
+        self.emit(db, project, actor, "finding.create", {"resource_id": finding.id})
+        task.status, task.assignee_id, task.lease_until = "open", None, None
         task.version += 1
         return task
 

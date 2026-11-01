@@ -213,7 +213,7 @@ def test_jsonl_recovers_after_invalid_and_oversize_frames(settings, monkeypatch)
 def test_host_configs_and_context_are_separate(settings, monkeypatch, capsys):
     spool = cached(settings)
     spool.close()
-    monkeypatch.setattr(AgentSettings, "from_env", lambda state: settings)
+    monkeypatch.setattr(AgentSettings, "from_env", lambda state, access_file=None: settings)
     payload = json.dumps({"hook_event_name": "PreToolUse", "session_id": "same-session"})
     for host in ("codex", "claude-code"):
         monkeypatch.setattr(sys, "stdin", StringIO(payload))

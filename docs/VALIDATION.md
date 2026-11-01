@@ -2,9 +2,9 @@
 
 Дата: 2026-11-01.
 
-- `uv run pytest -q` із реальним PostgreSQL 17: **41 passed**.
-- `npm run test:web`: **5 passed**, транспорт браузера й повтори команд.
-- `npm run test:e2e`: **11 passed**, Chromium із реальним API та PostgreSQL.
+- `uv run pytest -q` із реальним PostgreSQL 17: **50 passed**.
+- `npm run test:web`: **9 passed**, транспорт, повтори й connection imports.
+- `npm run test:e2e`: **16 passed**, Chromium із реальним API та PostgreSQL.
 - `npm run format:web`: пройдено.
 - `uv run ruff check .`: пройдено.
 - `uv run ruff format --check .`: пройдено.
@@ -85,3 +85,24 @@ SHA-256 і видимість завершення роботи з іншого 
 повторний запуск явно дозволив потрібні інтерпретатори. Обхід permissions не
 вмикався. Перевіряли серверні результати, а не лише exit code CLI.
 Деталі, межі й санітизований звіт: [LIVE-ACCEPTANCE.md](LIVE-ACCEPTANCE.md).
+
+## Робочий контекст і люди без акаунтів, 0.2
+
+Нові тести перевіряють budget/scope/privacy контексту, повні resource details,
+literal search, handoff rollback/replay і старі leases, outbox receipts, приватний
+connection file без змішування env, HttpOnly/path/SameSite/Secure cookies,
+cookie CSRF, revoke і незалежні identities у двох вкладках.
+MCP-процес із connection file передав роботу JSONL-клієнту через реальний HTTP;
+використано нові typed tools і перевірено структуровану помилку stale worker.
+
+У браузері пройдено запрошення людини без email/password, відкриття файла доступу,
+refresh/restore, logout, різні ролі в одному browser context, відхилення файла
+чужого сервера, receipts у Надісланих і передачу роботи з поясненням.
+
+Додатковий живий Claude Code (`claude-sonnet-5`) почав із get_context, знайшов
+evidence пошуком, прочитав повний finding за UUID й використав typed tools для
+progress/release/message/ack. Parent Codex через HTTP одразу взяв ту саму роботу
+й прочитав handoff, не очікуючи expiry. **13/13 контрольних умов**; 10 MCP-викликів
+моделі без legacy bootstrap або повного каталогу схем. Завдання свідомо не позначали
+завершеним: очікуваний людський review залишався невиконаним.
+[Санітизований звіт](acceptance/agent-ux-2026-11-01.json).
