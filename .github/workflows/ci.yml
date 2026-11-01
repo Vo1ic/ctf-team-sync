@@ -69,3 +69,11 @@ jobs:
           npm run test:e2e
       - name: Build Python package
         run: uv build
+      - name: Accept heterogeneous clients across containers
+        env:
+          TEAM_SYNC_BOOTSTRAP_TOKEN: ci-acceptance-bootstrap-only
+          TEAM_SYNC_DB_PASSWORD: 0123456789abcdef0123456789abcdef
+        run: |
+          trap 'docker compose down --volumes' EXIT
+          docker compose up --build -d
+          uv run python scripts/acceptance.py --url http://localhost:8000

@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "project_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Actor Id"
+    },
+    "consumer": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Consumer",
+      "type": "string"
+    },
+    "delivery_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Delivery Id"
+    },
+    "after_cursor": {
+      "minimum": 0,
+      "title": "After Cursor",
+      "type": "integer"
+    },
+    "through_cursor": {
+      "minimum": 0,
+      "title": "Through Cursor",
+      "type": "integer"
+    },
+    "items": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "project_id",
+    "actor_id",
+    "consumer",
+    "delivery_id",
+    "after_cursor",
+    "through_cursor",
+    "items"
+  ],
+  "title": "DeliveryBatch",
+  "type": "object"
+}

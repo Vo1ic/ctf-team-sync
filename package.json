@@ -6,7 +6,7 @@
   "scripts": {
     "test:web": "node --test web-tests/*.test.js",
     "test:e2e": "playwright test",
-    "format:web": "prettier --check \"src/team_sync/web/*.{js,css,html}\" \"web-tests/**/*.js\" playwright.config.js package.json"
+    "format:web": "prettier --check \"src/team_sync/web/*.{js,css,html}\" \"web-tests/**/*.{js,mjs}\" \"examples/**/*.mjs\" \"scripts/*.mjs\" playwright.config.js package.json"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.0",

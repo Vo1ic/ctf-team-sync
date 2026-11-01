@@ -1,8 +1,9 @@
 # Agent delivery adapters
 
-The MCP bridge remains the interface for actions. A separate event receiver makes
+HTTP, MCP, and JSONL expose the same actions. A separate event receiver makes
 incoming context available without asking the model to poll its inbox every step.
-The first host adapter supports Codex lifecycle hooks.
+Host formatters support Codex and Claude Code hooks. Runtimes without hooks or MCP
+use the [generic agent protocol](AGENT-PROTOCOL.md).
 
 ```text
 Team Sync API → long polling → private local SQLite cache → Codex hook → model context
@@ -67,15 +68,18 @@ stored in the database, but cached message bodies are private project data.
 Do not share or commit the cache. Use `--state /absolute/path/cache.sqlite3` before
 the subcommand to choose another location; `.team-sync/` is gitignored.
 
-## Configure Codex hooks
+## Configure host hooks
 
 Print the configuration on the device running Codex:
 
 ```sh
 uv run team-sync-agent codex-config
+uv run team-sync-agent hook-config --host claude-code
 ```
 
 Merge the returned `hooks` entries into the CTF workspace's `.codex/hooks.json`.
+For Claude Code, merge its generated `hooks` into `.claude/settings.local.json`
+or an appropriate reviewed settings file. Host-specific fields stay separate.
 Preserve existing hook groups. The generator writes no global or project config
 and contains no credentials. It uses the current Python interpreter's absolute
 path; regenerate after moving the checkout or recreating its environment. Custom
@@ -116,5 +120,6 @@ and explicit processing. Hook output follows the published Codex contract.
 
 An actual trusted Codex model session and two physical teammate devices still
 need a manual acceptance run. Tests do not spend model tokens or inject messages
-into the user's existing chat. Other hosts can reuse the receiver and generic
-`context` command, with a separate adapter for their documented lifecycle contract.
+into the user's existing chat. Other hosts can use JSONL with explicit context
+acknowledgements, plain HTTP, or a formatter for their lifecycle contract. The
+Claude native binary has not been exercised as a model session in this environment.

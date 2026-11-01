@@ -126,10 +126,14 @@ Bootstrap повертає огляд і перші 100 actors/challenges/tasks.
 Час останнього мережевого контакту не слід показувати як доказ активності моделі.
 
 Перша реалізація такого адаптера — `team-sync-agent`: окремий receiver, приватний
-SQLite-кеш, outbox підтверджень і Codex lifecycle hook. Серверний курсор комітиться
+SQLite-кеш, outbox підтверджень і незалежні форматери Codex/Claude Code.
+Для власних runtimes є версійований JSONL bridge. Серверний курсор комітиться
 разом із локальним вмістом до `received`; cursor emission ведеться окремо для кожної
 сесії. `processed` не встановлюється автоматично. Hook читає кеш без мережі й не
-пробуджує idle session. Повний контракт і межі: [ADAPTERS.md](ADAPTERS.md).
+пробуджує idle session. JSONL delivery використовує окремий delivery ID: читання
+не рухає cursor, а явний ack комітить його атомарно. Повторний ack ідемпотентний.
+Повний контракт: [AGENT-PROTOCOL.md](AGENT-PROTOCOL.md); рішення й сумісність:
+[ADR](adr/0001-heterogeneous-agent-delivery.md).
 
 Межа відповідальності host описана в [архітектурі MCP](https://modelcontextprotocol.io/docs/2026-07-28/learn/architecture):
 протокол передає контекст, а застосунок вирішує, як використовувати його з моделлю.

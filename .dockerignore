@@ -1,6 +1,9 @@
 .git
 .venv
 .env
+.env.*
+!.env.example
+.team-sync
 data
 .pytest_cache
 .ruff_cache

@@ -12,9 +12,9 @@ exchange messages, track flags, and share files. A self-hosted API keeps the sta
 the web interface and a portable MCP bridge use the same domain operations.
 
 **Status:** early development, version 0.1.0. The web interface is currently in Ukrainian.
-The Codex hook adapter supplies incoming context at lifecycle checkpoints using a
-durable local receiver. It does not wake idle sessions. Other hosts can use the
-MCP inbox/event tools or add an adapter for their own lifecycle contract.
+A shared receiver supports Codex hooks, Claude Code hooks, and a generic JSONL
+bridge with explicit context acknowledgement. HTTP-only agents need no Python
+or MCP. Host adapters deliver at supported checkpoints and do not wake idle sessions.
 
 ![Team Sync dashboard showing tasks, findings, and team activity](docs/assets/overview.png)
 
@@ -32,7 +32,7 @@ MCP inbox/event tools or add an adapter for their own lifecycle contract.
 - **Immutable artifacts:** explicit file publishing, stable IDs, and SHA-256 verification.
 - **Web interface:** shared state and live updates, including access management and MCP configuration export.
 - **Portable MCP bridge:** a local stdio process connects an agent to the team's remote API.
-- **Codex context delivery:** a separate event receiver caches updates for lifecycle hooks, with resumable cursors and explicit processing receipts.
+- **Heterogeneous agents:** HTTP, MCP, and JSONL share one domain protocol; Codex and Claude Code hooks are optional host adapters.
 
 ## Architecture
 
@@ -40,6 +40,9 @@ MCP inbox/event tools or add an adapter for their own lifecycle contract.
 flowchart LR
     Agent[Agent in CLI or IDE] <-->|stdio MCP| Bridge[Local MCP bridge]
     Bridge <-->|HTTPS API| Server[Team Sync server]
+    Custom[Custom runtime] <-->|JSONL| JSONL[Generic bridge]
+    JSONL <-->|HTTPS API| Server
+    HTTP[HTTP-only agent] <-->|HTTPS API| Server
     Browser[Team web interface] <-->|API and events| Server
     Server <--> Database[(PostgreSQL)]
     Server <--> Files[Artifact storage]
@@ -135,6 +138,17 @@ For context delivery without agent-initiated polling, see [Agent adapters](docs/
 The receiver runs with `uv run team-sync-agent watch`; `codex-config` prints hook
 configuration for review and merging, without modifying existing Codex settings.
 
+For runtimes without MCP or hooks, see the [host-independent protocol](docs/AGENT-PROTOCOL.md)
+and [Node reference client](examples/jsonl-client.mjs). Client/provider/model names
+are open metadata. A runtime can choose its context budget and explicitly confirm
+delivery without automatically marking messages processed.
+
+```sh
+uv run team-sync-agent bridge
+uv run team-sync-agent hook-config --host claude-code
+uv run team-sync-agent capabilities --host generic
+```
+
 ## Development
 
 The runtime is Python, FastAPI, and PostgreSQL. HTML, CSS, and JavaScript ship
@@ -177,6 +191,7 @@ integrity, two independent MCP processes, and multiple browser sessions.
 
 - [Contributing](CONTRIBUTING.md)
 - [Agent delivery adapters](docs/ADAPTERS.md)
+- [Host-independent protocol and network acceptance](docs/AGENT-PROTOCOL.md)
 - [Machine-readable contracts](contracts/)
 - [Architecture and invariants — Ukrainian](docs/ARCHITECTURE.md)
 - [API protocol — Ukrainian](docs/PROTOCOL.md)
@@ -185,7 +200,7 @@ integrity, two independent MCP processes, and multiple browser sessions.
 
 Next priorities are real host acceptance tests, more CLI/IDE adapters, testing across physical devices,
 task dependencies, and CTF platform integrations. The current release has no
-automatic flag submission, folder mirroring, or agent runtime injection.
+automatic flag submission, folder mirroring, or universal idle-session wake-up.
 
 ## License
 

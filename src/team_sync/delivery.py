@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -80,6 +80,9 @@ class Spool:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA foreign_keys=ON")
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 1:
+            self.db.close()
+            raise DeliveryError("Delivery cache schema requires a newer adapter")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events (
@@ -92,7 +95,15 @@ class Spool:
             CREATE TABLE IF NOT EXISTS consumers (
                 name TEXT PRIMARY KEY, emitted_cursor INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS delivery_batches (
+                id TEXT PRIMARY KEY, consumer TEXT NOT NULL,
+                after_cursor INTEGER NOT NULL, through_cursor INTEGER NOT NULL,
+                payload TEXT NOT NULL, acked INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS one_pending_batch
+                ON delivery_batches(consumer) WHERE acked=0;
         """)
+        self.db.execute("PRAGMA user_version=1")
         expected = json.dumps(settings.binding(), sort_keys=True)
         try:
             with self.transaction():
@@ -167,6 +178,15 @@ class Spool:
             for message_id in processed:
                 self.db.execute("UPDATE events SET context=NULL WHERE message_id=?", (message_id,))
                 self.db.execute("DELETE FROM pending_receipts WHERE message_id=?", (message_id,))
+            if processed:
+                for batch in self.db.execute(
+                    "SELECT id,payload FROM delivery_batches WHERE acked=0"
+                ).fetchall():
+                    if any(
+                        item.get("message", {}).get("id") in processed
+                        for item in json.loads(batch["payload"])["items"]
+                    ):
+                        self.db.execute("DELETE FROM delivery_batches WHERE id=?", (batch["id"],))
             self.set_meta("cursor", str(cursor))
 
     def pending_receipts(self):
@@ -221,7 +241,74 @@ class Spool:
         )
 
     def replay(self, consumer):
-        self.db.execute("DELETE FROM consumers WHERE name=?", (consumer,))
+        with self.transaction():
+            self.db.execute("DELETE FROM consumers WHERE name=?", (consumer,))
+            self.db.execute(
+                "DELETE FROM delivery_batches WHERE consumer=? AND acked=0", (consumer,)
+            )
+
+    def read_context(self, consumer, *, limit=12, max_chars=6000):
+        with self.transaction():
+            binding = json.loads(self.get_meta("binding"))
+            previous = self.db.execute(
+                "SELECT emitted_cursor FROM consumers WHERE name=?", (consumer,)
+            ).fetchone()
+            after = previous[0] if previous else 0
+            empty = {
+                "schema_version": 1,
+                "project_id": binding["project_id"],
+                "actor_id": self.get_meta("actor_id"),
+                "consumer": consumer,
+                "delivery_id": None,
+                "after_cursor": after,
+                "through_cursor": after,
+                "items": [],
+            }
+            if self.get_meta("blocked"):
+                return empty
+            pending = self.db.execute(
+                "SELECT payload FROM delivery_batches WHERE consumer=? AND acked=0", (consumer,)
+            ).fetchone()
+            if pending:
+                return json.loads(pending[0])
+            items, through = self.context_batch(consumer, limit=limit, max_chars=max_chars)
+            if not items:
+                return empty
+            payload = {
+                **empty,
+                "delivery_id": str(uuid4()),
+                "through_cursor": through,
+                "items": items,
+            }
+            self.db.execute(
+                "INSERT INTO delivery_batches(id,consumer,after_cursor,through_cursor,payload) "
+                "VALUES (?,?,?,?,?)",
+                (payload["delivery_id"], consumer, after, through, json.dumps(payload)),
+            )
+            return payload
+
+    def ack_context(self, consumer, delivery_id):
+        with self.transaction():
+            if self.get_meta("blocked"):
+                raise DeliveryError(
+                    "Context acknowledgement is unavailable after access revocation"
+                )
+            row = self.db.execute(
+                "SELECT * FROM delivery_batches WHERE id=? AND consumer=?", (delivery_id, consumer)
+            ).fetchone()
+            if row is None:
+                raise DeliveryError("Unknown, invalidated, or mismatched context delivery")
+            if not row["acked"]:
+                self.emitted(consumer, row["through_cursor"])
+                self.db.execute(
+                    "UPDATE delivery_batches SET acked=1,payload='{}' WHERE id=?", (delivery_id,)
+                )
+            return {
+                "delivery_id": delivery_id,
+                "consumer": consumer,
+                "through_cursor": row["through_cursor"],
+                "already_acked": bool(row["acked"]),
+            }
 
     def status(self):
         return {
@@ -232,6 +319,9 @@ class Spool:
                 "SELECT COUNT(*) FROM events WHERE context IS NOT NULL"
             ).fetchone()[0],
             "receipts_pending": len(self.pending_receipts()),
+            "deliveries_pending": self.db.execute(
+                "SELECT COUNT(*) FROM delivery_batches WHERE acked=0"
+            ).fetchone()[0],
             "blocked": self.get_meta("blocked") or None,
         }
 

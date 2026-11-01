@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from team_sync import schemas as s
+from team_sync.bridge_protocol import DeliveryBatch, request_schema
 
 
 def operation_schemas():
@@ -39,6 +40,8 @@ def main():
         "openapi.json": app.openapi(),
         "commands.schema.json": operation_schemas(),
         "event.schema.json": s.EventEnvelope.model_json_schema(),
+        "agent-bridge.schema.json": request_schema(),
+        "delivery-batch.schema.json": DeliveryBatch.model_json_schema(),
     }
     for name, document in documents.items():
         (directory / name).write_text(json.dumps(document, indent=2) + "\n")

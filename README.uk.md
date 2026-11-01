@@ -9,6 +9,8 @@
 [машинні контракти](contracts/), [робота у вебінтерфейсі](docs/WEB.md).
 
 Доставка в контекст: [адаптери агентів](docs/ADAPTERS.md).
+Для довільних моделей і середовищ: [спільний протокол HTTP/MCP/JSONL](docs/AGENT-PROTOCOL.md).
+Адаптери Codex і Claude Code — окремі форматери; клієнт може працювати лише через HTTP.
 
 ## Що вже працює
 
@@ -78,6 +80,21 @@ bridge; всі учасники вказують URL одного сервера
 
 Інструменти: `bootstrap`, `list_items`, `command_contracts`, `command`, `inbox`,
 `wait_events`, `publish_artifact`, `fetch_artifact`.
+
+Власні агенти без MCP/hooks можуть запускати `uv run team-sync-agent bridge`.
+JSONL-профіль узгоджує версію, приймає довільні назви runtime/provider/model,
+підтримує обмеження розміру контексту та явне підтвердження доставки. Для Claude:
+`uv run team-sync-agent hook-config --host claude-code`.
+
+Мережевий сценарій приймання для двох різних контейнерних клієнтів:
+
+```sh
+uv run python scripts/acceptance.py --env-file .env
+```
+
+Він створює окремий тестовий CTF. Python/MCP (Debian) і Node/HTTP (Alpine)
+обмінюються роботою, файлами, знахідками й повідомленнями. Доступ до створеного
+CTF зберігається у приватній, gitignored директорії `.team-sync/acceptance/`.
 
 Власник може створювати identities у розділі **Команда** та одразу завантажувати
 MCP-конфігурацію з виданим токеном. Шлях до checkout учасник замінює на власний.

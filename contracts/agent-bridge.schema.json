@@ -1,0 +1,589 @@
+{
+  "$defs": {
+    "AckContext": {
+      "additionalProperties": false,
+      "properties": {
+        "consumer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Consumer",
+          "type": "string"
+        },
+        "delivery_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Delivery Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "consumer",
+        "delivery_id"
+      ],
+      "title": "AckContext",
+      "type": "object"
+    },
+    "AgentAction": {
+      "additionalProperties": false,
+      "description": "Transport-independent MCP command envelope.",
+      "properties": {
+        "operation": {
+          "enum": [
+            "challenge.create",
+            "task.create",
+            "task.claim",
+            "task.renew",
+            "task.complete",
+            "finding.create",
+            "flag.create",
+            "flag.verify",
+            "submission.create",
+            "message.send",
+            "message.ack"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "resource_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Id"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "idempotency_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation",
+        "idempotency_key"
+      ],
+      "title": "AgentAction",
+      "type": "object"
+    },
+    "ClientInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ClientInfo",
+      "type": "object"
+    },
+    "Hello": {
+      "additionalProperties": false,
+      "properties": {
+        "protocol_versions": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Protocol Versions",
+          "type": "array"
+        },
+        "client": {
+          "$ref": "#/$defs/ClientInfo"
+        }
+      },
+      "required": [
+        "protocol_versions",
+        "client"
+      ],
+      "title": "Hello",
+      "type": "object"
+    },
+    "Inbox": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "Inbox",
+      "type": "object"
+    },
+    "ListItems": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "enum": [
+            "actors",
+            "challenges",
+            "tasks",
+            "findings",
+            "flags",
+            "verifications",
+            "submissions",
+            "artifacts"
+          ],
+          "title": "Collection",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection"
+      ],
+      "title": "ListItems",
+      "type": "object"
+    },
+    "ReadContext": {
+      "additionalProperties": false,
+      "properties": {
+        "consumer": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Consumer",
+          "type": "string"
+        },
+        "max_items": {
+          "default": 12,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Items",
+          "type": "integer"
+        },
+        "max_chars": {
+          "default": 6000,
+          "maximum": 20000,
+          "minimum": 1024,
+          "title": "Max Chars",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "consumer"
+      ],
+      "title": "ReadContext",
+      "type": "object"
+    },
+    "Sync": {
+      "additionalProperties": false,
+      "properties": {
+        "timeout": {
+          "default": 0,
+          "maximum": 25,
+          "minimum": 0,
+          "title": "Timeout",
+          "type": "integer"
+        }
+      },
+      "title": "Sync",
+      "type": "object"
+    },
+    "collections_listRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "collections/list",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ListItems"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "collections_listRequest",
+      "type": "object"
+    },
+    "commands_executeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "commands/execute",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AgentAction"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "commands_executeRequest",
+      "type": "object"
+    },
+    "context_ackRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "context/ack",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AckContext"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "context_ackRequest",
+      "type": "object"
+    },
+    "context_readRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "context/read",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ReadContext"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "context_readRequest",
+      "type": "object"
+    },
+    "events_syncRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "events/sync",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/Sync"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "events_syncRequest",
+      "type": "object"
+    },
+    "messages_inboxRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "messages/inbox",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/Inbox"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "messages_inboxRequest",
+      "type": "object"
+    },
+    "protocol_helloRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "protocol/hello",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/Hello"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "protocol_helloRequest",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "collections/list": "#/$defs/collections_listRequest",
+      "commands/execute": "#/$defs/commands_executeRequest",
+      "context/ack": "#/$defs/context_ackRequest",
+      "context/read": "#/$defs/context_readRequest",
+      "events/sync": "#/$defs/events_syncRequest",
+      "messages/inbox": "#/$defs/messages_inboxRequest",
+      "protocol/hello": "#/$defs/protocol_helloRequest"
+    },
+    "propertyName": "method"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/protocol_helloRequest"
+    },
+    {
+      "$ref": "#/$defs/events_syncRequest"
+    },
+    {
+      "$ref": "#/$defs/context_readRequest"
+    },
+    {
+      "$ref": "#/$defs/context_ackRequest"
+    },
+    {
+      "$ref": "#/$defs/commands_executeRequest"
+    },
+    {
+      "$ref": "#/$defs/collections_listRequest"
+    },
+    {
+      "$ref": "#/$defs/messages_inboxRequest"
+    }
+  ]
+}
