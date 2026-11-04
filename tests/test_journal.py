@@ -255,3 +255,34 @@ def test_log_replay_observer_denial_and_rate_limit(client, project):
     response = execute(client, project, "log.create", {"body": "Over budget"})
     assert response.status_code == 429
     assert command(client, project, "log.create", {"body": "Progress"}, key=key) == first
+
+
+def test_override_preserves_other_live_work_and_names_the_actual_editor(client, project):
+    agent = enroll(client, project)
+    first = command(client, project, "task.create", {"title": "First"})
+    second = command(client, project, "task.create", {"title": "Second"})
+    first = command(
+        client, project, "task.claim", {"expected_version": 1}, first["id"], agent["token"]
+    )
+    command(client, project, "task.claim", {"expected_version": 1}, second["id"], agent["token"])
+    response = update(
+        client,
+        project,
+        "tasks",
+        first,
+        {"status": "open"},
+        force=True,
+        reason="Hand off only the first task",
+    )
+    assert response.status_code == 200, response.text
+    profile = get(client, project, f"resources/actors/{agent['actor']['id']}").json()["item"]
+    assert profile["activity"]["state"] == "working"
+    assert profile["activity"]["task_id"] == second["id"]
+    audit = get(
+        client,
+        project,
+        "journal",
+        event_type="activity.update",
+        resource_id=profile["activity"]["id"],
+    ).json()
+    assert audit["items"][0]["actor"]["id"] == project["actor"]["id"]

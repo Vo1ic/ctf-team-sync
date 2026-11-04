@@ -126,7 +126,7 @@ class WorkflowOperations:
             db, project, actor, actor, data.state, data.detail, task, data.ttl_seconds
         )
 
-    def _after_task(self, db, project, actor):
+    def _after_task(self, db, project, actor, caller=None):
         timestamp = db.scalar(select(func.clock_timestamp()))
         other = db.scalar(
             select(m.Task)
@@ -142,7 +142,7 @@ class WorkflowOperations:
         self._activity(
             db,
             project,
-            actor,
+            caller or actor,
             actor,
             self.task_activity(other) if other else "idle",
             other.title if other else "Завершив поточний крок",

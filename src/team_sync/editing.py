@@ -297,9 +297,7 @@ class EditingOperations:
                     None,
                 )
                 item.approval_note = None
-            self._activity(
-                db, project, actor, old, "ready", f"Координатор змінив роботу: {item.title}"
-            )
+            self._after_task(db, project, old, caller=actor)
             if old.id != actor.id and old.active:
                 self._notice(
                     db,
