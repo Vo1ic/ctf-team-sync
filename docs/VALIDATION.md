@@ -109,7 +109,7 @@ progress/release/message/ack. Parent Codex через HTTP одразу взяв
 
 ## Людина, артефакти й увага, 0.3
 
-Локально: 63 Python-тести на PostgreSQL 17, 9 Node-тестів, 20 Playwright-тестів.
+Локально: 64 Python-тести на PostgreSQL 17, 9 Node-тестів, 20 Playwright-тестів.
 Перевірено заборону байтів до рішення й explicit start, agent-owner без права
 human approval/видачі human identity, передачу роботи з новим дозволом, README
 із provenance, причину архівування та відновлення, прострочений lease, номінацію

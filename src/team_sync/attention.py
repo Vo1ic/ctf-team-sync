@@ -3,7 +3,7 @@
 import json
 from datetime import timedelta
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 
 from team_sync import models as m
 from team_sync.domain import digest, fail, record
@@ -73,6 +73,40 @@ def attention(db, project, actor, query):
         m.Message.project_id == project.id,
         or_(m.Message.recipient_id == actor.id, m.Message.recipient_id.is_(None)),
     )
+    # A different human may decide, or the agent may release the task. The original
+    # approval request then stops needing attention without inventing a processed receipt.
+    automatic_request = and_(
+        m.Message.kind == "approval",
+        m.Message.group_key.is_not(None),
+        m.Message.task_id.is_not(None),
+        m.Message.group_key == "task:" + m.Message.task_id + ":approval",
+        exists(
+            select(m.Task.id).where(
+                m.Task.project_id == project.id,
+                m.Task.id == m.Message.task_id,
+                m.Task.kind == "artifact_review",
+            )
+        ),
+        exists(
+            select(m.Actor.id).where(
+                m.Actor.project_id == project.id,
+                m.Actor.id == m.Message.sender_id,
+                m.Actor.kind == "agent",
+            )
+        ),
+    )
+    live_request = exists(
+        select(m.Task.id).where(
+            m.Task.project_id == project.id,
+            m.Task.id == m.Message.task_id,
+            m.Task.kind == "artifact_review",
+            m.Task.status == "running",
+            m.Task.approval_status == "pending",
+            m.Task.assignee_id == m.Message.sender_id,
+            m.Task.lease_until > timestamp,
+        )
+    )
+    visible = visible.where(or_(~automatic_request, live_request))
     # Only explicit status updates supersede one another. A question never disappears
     # because a later message happened to use the same topic or similar text.
     group = case(

@@ -478,3 +478,41 @@ def test_attention_bounds_large_bodies_and_full_resource_keeps_evidence(client, 
     assert packet["has_more"] and packet["items"][0]["body_truncated"]
     full = get(client, project, packet["items"][0]["resource"], agent["token"]).json()
     assert "END-OF-EVIDENCE" in full["body"] and full["ack_stage"] is None
+
+
+def test_another_humans_decision_retires_request_without_faking_uploader_processing(
+    client, project
+):
+    agent = enroll(client, project)
+    uploader = client.post(
+        f"/api/v1/projects/{project['project']['id']}/actors",
+        headers=headers(project["token"]),
+        json={"kind": "human", "name": "Uploader"},
+    ).json()
+    response = client.post(
+        f"/api/v1/projects/{project['project']['id']}/artifacts",
+        headers={**headers(uploader["token"]), "Idempotency-Key": str(uuid4())},
+        params={"name": "human.txt", "requires_review": True},
+        content=b"Human evidence",
+    )
+    artifact = response.json()
+    task = command(
+        client, project, "artifact.review.request", ident=artifact["id"], token=agent["token"]
+    )
+    assert get(client, project, "attention", uploader["token"]).json()["total"] == 1
+    command(
+        client,
+        project,
+        "artifact.review.decide",
+        {
+            "expected_version": task["version"],
+            "decision": "approved",
+        },
+        task["id"],
+    )
+    assert get(client, project, "attention", uploader["token"]).json()["total"] == 0
+    original = get(client, project, "inbox", uploader["token"]).json()["items"][0]
+    assert original["ack_stage"] is None
+    assert (
+        get(client, project, "attention", agent["token"]).json()["items"][0]["kind"] == "approval"
+    )
