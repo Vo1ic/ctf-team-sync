@@ -129,3 +129,23 @@ README-download та archive/restore проходять браузерні те�
 Claude Code процеси підтвердили gated bytes та аналіз випадкового маркера:
 див. [живе приймання](LIVE-ACCEPTANCE.md). Human approval у цьому прогоні —
 симуляція тестового стенда, не дія реальної людини.
+
+## Редагування, 0.4
+
+84 Python-тести на PostgreSQL 17, 9 Node-тестів, 24 браузерні сценарії.
+Додано правки всіх 11 робочих колекцій, before/after та provenance, scopes/FK
+історії, permission matrix/останнього owner, replay і concurrent version conflict,
+rollback після запису revision, переміщення task разом із finding scopes,
+виправлення flag без зміни subject старих перевірок/відправлень, immutable bytes
+та нову згоду на наступну файлову версію. Приватна історія недоступна стороннім.
+
+Браузер перевіряє налаштування CTF й історію, збереження чернетки при конфлікті,
+редагування текстового артефакту з двома збереженими файлами, mobile layout,
+редагування приватного повідомлення та новий receipt адресата. Неправлені поля,
+включно з секундною точністю expiry, не перезаписуються формою.
+
+Окремий native MCP subprocess редагує finding; JSONL читає ту саму правку й
+схему. Receiver/SQLite повторно доставляє v2 у ту саму hook-сесію, інвалідує
+старий packet і не плутає processed v1 із новим текстом, навіть в одному batch.
+Окремо пройшов реальний Claude Code зі збереженням випадкового маркера та
+version-specific acknowledgement: [деталі](LIVE-ACCEPTANCE.md).

@@ -148,6 +148,8 @@ export function modal(title, content, { wide = false, onClose } = {}) {
     onClose?.();
   };
   if (!dialog.open) dialog.showModal();
+  dialog.scrollTop = 0;
+  dialog.scrollLeft = 0;
   return dialog;
 }
 

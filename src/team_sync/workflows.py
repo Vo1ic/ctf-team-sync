@@ -83,8 +83,10 @@ class WorkflowOperations:
         if actor.id != target.id and actor.role != "owner":
             fail(403, "forbidden", "Only the actor or project owner can rename this identity")
         self.check_version(target, data.expected_version)
+        before = record(target)
         target.name = self.unique_name(db, project.id, data.name, target.kind, target.id)
         target.version += 1
+        self._revision(db, project, actor, "actors", target, before)
         return target
 
     def _activity(self, db, project, caller, target, state, detail="", task=None, ttl=120):
@@ -110,6 +112,7 @@ class WorkflowOperations:
             item.state, item.detail = state, detail[:300]
             item.task_id = task.id if task else None
             item.updated_at, item.expires_at = timestamp, timestamp + timedelta(seconds=ttl)
+            item.version += 1
         self.emit(
             db, project, caller, "activity.update", {"resource_id": item.id, "actor_id": target.id}
         )
@@ -391,9 +394,23 @@ class WorkflowOperations:
                 m.Message.recipient_id == actor.id,
             )
         ):
-            self.ack_message(db, project, actor, s.MessageAck(stage="processed"), message.id)
+            self.ack_message(
+                db,
+                project,
+                actor,
+                s.MessageAck(stage="processed", expected_version=message.version),
+                message.id,
+            )
             self.emit(
-                db, project, actor, "message.ack", {"resource_id": message.id, "stage": "processed"}
+                db,
+                project,
+                actor,
+                "message.ack",
+                {
+                    "resource_id": message.id,
+                    "stage": "processed",
+                    "message_version": message.version,
+                },
             )
         return task
 
@@ -451,12 +468,14 @@ class WorkflowOperations:
         )
         self.emit(db, project, actor, "finding.create", {"resource_id": report.id})
         if data.verdict == "unusable":
+            before = record(artifact)
             artifact.archived, artifact.archive_reason, artifact.archived_by_id = (
                 True,
                 data.reason,
                 actor.id,
             )
             artifact.version += 1
+            self._revision(db, project, actor, "artifacts", artifact, before, data.reason)
             self.emit(
                 db,
                 project,
@@ -489,6 +508,7 @@ class WorkflowOperations:
     def archive_artifact(self, db, project, actor, data, resource_id):
         artifact = self.get(db, m.Artifact, project.id, resource_id)
         self.check_version(artifact, data.expected_version)
+        before = record(artifact)
         if actor.kind != "human" or (
             actor.id != artifact.author_id and actor.role not in {"owner", "coordinator"}
         ):
@@ -503,6 +523,7 @@ class WorkflowOperations:
             actor.id,
         )
         artifact.version += 1
+        self._revision(db, project, actor, "artifacts", artifact, before, data.reason)
         if data.archived:
             for task in db.scalars(
                 select(m.Task).where(

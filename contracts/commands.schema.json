@@ -1,4 +1,51 @@
 {
+  "resource.update": {
+    "additionalProperties": false,
+    "properties": {
+      "collection": {
+        "enum": [
+          "projects",
+          "actors",
+          "challenges",
+          "tasks",
+          "findings",
+          "flags",
+          "verifications",
+          "submissions",
+          "artifacts",
+          "messages",
+          "activities"
+        ],
+        "title": "Collection",
+        "type": "string"
+      },
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "changes": {
+        "additionalProperties": true,
+        "maxProperties": 20,
+        "minProperties": 1,
+        "title": "Changes",
+        "type": "object"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "collection",
+      "expected_version",
+      "changes"
+    ],
+    "title": "ResourceEdit",
+    "type": "object"
+  },
   "challenge.create": {
     "additionalProperties": false,
     "properties": {
@@ -745,6 +792,19 @@
   "message.ack": {
     "additionalProperties": false,
     "properties": {
+      "expected_version": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Version"
+      },
       "stage": {
         "enum": [
           "received",

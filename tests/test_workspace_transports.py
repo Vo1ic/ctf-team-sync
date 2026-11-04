@@ -15,6 +15,88 @@ from .test_human_workflows import upload
 from .test_transports import live_server as live_server
 
 
+def test_native_mcp_edit_is_visible_through_jsonl_history(client, project, live_server, tmp_path):
+    agent = enroll(client, project, "Cross-runtime editor")
+    access = tmp_path / "access.json"
+    access.write_text(
+        json.dumps(
+            {"url": live_server, "project_id": project["project"]["id"], "token": agent["token"]}
+        )
+    )
+    settings = AgentSettings.from_env(tmp_path / "edit.db", access)
+    spool = Spool(settings)
+    bridge = JSONLBridge(settings, spool)
+
+    def rpc(method, params):
+        response = bridge.handle(
+            {"jsonrpc": "2.0", "id": str(uuid4()), "method": method, "params": params}
+        )
+        assert "error" not in response, response
+        return response["result"]
+
+    rpc("protocol/hello", {"protocol_versions": [1], "client": {"name": "Arbitrary editor CLI"}})
+
+    async def scenario():
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "team_sync.mcp"],
+            env={**os.environ, "TEAM_SYNC_ACCESS_FILE": str(access)},
+        )
+        async with stdio_client(params) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+
+                async def call(name, args):
+                    response = await session.call_tool(name, args)
+                    assert not response.isError, response.content
+                    return json.loads(response.content[0].text)
+
+                contract = await call("get_edit_contract", {"collection": "findings"})
+                assert "body" in contract["changes"]["properties"]
+                finding = await call(
+                    "report_finding",
+                    {
+                        "title": "Portable README",
+                        "body": "Original",
+                        "evidence": "Synthetic",
+                        "idempotency_key": str(uuid4()),
+                    },
+                )
+                edited = await call(
+                    "edit_resource",
+                    {
+                        "collection": "findings",
+                        "resource_id": finding["id"],
+                        "expected_version": finding["version"],
+                        "changes": {"body": "Cross-runtime correction"},
+                        "reason": "Correct evidence",
+                        "idempotency_key": str(uuid4()),
+                    },
+                )
+                assert edited["version"] == 2 and edited["author_id"] == agent["actor"]["id"]
+                history = rpc(
+                    "resources/history", {"collection": "findings", "resource_id": finding["id"]}
+                )
+                assert history["total"] == 1 and history["items"][0]["before"]["body"] == "Original"
+                full = await call(
+                    "get_edit_history",
+                    {
+                        "collection": "findings",
+                        "resource_id": finding["id"],
+                        "revision_id": history["items"][0]["id"],
+                    },
+                )
+                assert full["after"]["body"] == "Cross-runtime correction"
+                fields = rpc("resources/edit-contract", {"collection": "tasks"})
+                assert "title" in fields["changes"]["properties"]
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        bridge.close()
+        spool.close()
+
+
 def test_native_mcp_human_review_report_and_jsonl_attention(client, project, live_server, tmp_path):
     agent = enroll(client, project, "Kira")
     artifact = upload(client, project)

@@ -38,6 +38,7 @@ class Project(Base):
     rules: Mapped[str] = mapped_column(Text, default="")
     event_seq: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Scoped:
@@ -82,6 +83,7 @@ class Challenge(Scoped, Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str | None] = mapped_column(String(100))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Task(Scoped, Base):
@@ -138,6 +140,7 @@ class Finding(Scoped, Base):
     task_id: Mapped[str | None] = mapped_column(String(36))
     author_id: Mapped[str] = mapped_column(String(36))
     artifact_id: Mapped[str | None] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Flag(Scoped, Base):
@@ -175,6 +178,8 @@ class Verification(Scoped, Base):
     status: Mapped[str] = mapped_column(String(16))
     method: Mapped[str] = mapped_column(String(24))
     evidence: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    subject: Mapped[dict | None] = mapped_column(JSON)
 
 
 class Submission(Scoped, Base):
@@ -189,6 +194,8 @@ class Submission(Scoped, Base):
     author_id: Mapped[str] = mapped_column(String(36))
     outcome: Mapped[str] = mapped_column(String(16))
     evidence: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    subject: Mapped[dict | None] = mapped_column(JSON)
 
 
 class Message(Scoped, Base):
@@ -216,6 +223,7 @@ class Message(Scoped, Base):
     reply_to_id: Mapped[str | None] = mapped_column(String(36))
     fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
     duplicate_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Receipt(Base):
@@ -230,12 +238,17 @@ class Receipt(Base):
     actor_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     stage: Mapped[str] = mapped_column(String(16))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    message_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Artifact(Scoped, Base):
     __tablename__ = "artifacts"
     __table_args__ = scoped_constraints(
-        "artifacts", reference("author_id", "actors"), reference("archived_by_id", "actors")
+        "artifacts",
+        reference("author_id", "actors"),
+        reference("archived_by_id", "actors"),
+        reference("supersedes_id", "artifacts"),
+        UniqueConstraint("project_id", "supersedes_id"),
     )
     name: Mapped[str] = mapped_column(String(255))
     sha256: Mapped[str] = mapped_column(String(64))
@@ -249,6 +262,7 @@ class Artifact(Scoped, Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     archive_reason: Mapped[str | None] = mapped_column(Text)
     archived_by_id: Mapped[str | None] = mapped_column(String(36))
+    supersedes_id: Mapped[str | None] = mapped_column(String(36))
 
 
 class Activity(Scoped, Base):
@@ -268,6 +282,62 @@ class Activity(Scoped, Base):
     detail: Mapped[str] = mapped_column(String(300), default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
+REVISION_TARGETS = {
+    "actors": "target_actor_id",
+    "challenges": "challenge_id",
+    "tasks": "task_id",
+    "findings": "finding_id",
+    "flags": "flag_id",
+    "verifications": "verification_id",
+    "submissions": "submission_id",
+    "messages": "message_id",
+    "artifacts": "artifact_id",
+    "activities": "activity_id",
+}
+
+
+class Revision(Scoped, Base):
+    __tablename__ = "resource_revisions"
+    __table_args__ = scoped_constraints(
+        "resource_revisions",
+        reference("editor_id", "actors"),
+        *(reference(column, table) for table, column in REVISION_TARGETS.items()),
+        *(
+            CheckConstraint(
+                f"collection != '{table}' OR ({column} IS NOT NULL AND {column}=resource_id)",
+                name=f"revision_{table}_target",
+            )
+            for table, column in REVISION_TARGETS.items()
+        ),
+        CheckConstraint(
+            "collection != 'projects' OR resource_id=project_id", name="revision_project_target"
+        ),
+        CheckConstraint(
+            "collection IN ('projects','actors','challenges','tasks','findings',"
+            "'flags','verifications','submissions','messages','artifacts','activities')",
+            name="revision_collection",
+        ),
+        Index("ix_revisions_resource", "project_id", "collection", "resource_id", "created_at"),
+    )
+    collection: Mapped[str] = mapped_column(String(24))
+    resource_id: Mapped[str] = mapped_column(String(36))
+    editor_id: Mapped[str] = mapped_column(String(36))
+    before: Mapped[dict] = mapped_column(JSON)
+    after: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    target_actor_id: Mapped[str | None] = mapped_column(String(36))
+    challenge_id: Mapped[str | None] = mapped_column(String(36))
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    finding_id: Mapped[str | None] = mapped_column(String(36))
+    flag_id: Mapped[str | None] = mapped_column(String(36))
+    verification_id: Mapped[str | None] = mapped_column(String(36))
+    submission_id: Mapped[str | None] = mapped_column(String(36))
+    message_id: Mapped[str | None] = mapped_column(String(36))
+    artifact_id: Mapped[str | None] = mapped_column(String(36))
+    activity_id: Mapped[str | None] = mapped_column(String(36))
 
 
 class Event(Base):

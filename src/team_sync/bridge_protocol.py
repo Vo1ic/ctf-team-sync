@@ -77,6 +77,16 @@ class GetResource(Input):
     limit: int = Field(default=10, ge=1, le=50)
 
 
+class History(GetResource):
+    limit: int = Field(default=5, ge=1, le=20)
+    revision_id: ID | None = None
+    max_chars: int = Field(default=12000, ge=4000, le=32000)
+
+
+class EditContract(Input):
+    collection: ResourceCollection
+
+
 class RPCEnvelope(Input):
     jsonrpc: Literal["2.0"]
     id: RequestID = None
@@ -96,6 +106,8 @@ METHODS = {
     "messages/attention": AttentionQuery,
     "workspace/context": WorkspaceQuery,
     "resources/get": GetResource,
+    "resources/history": History,
+    "resources/edit-contract": EditContract,
     "resources/search": SearchQuery,
 }
 

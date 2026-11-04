@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, or_, select
 
 from team_sync import models as m
 from team_sync.core import record
+from team_sync.editing import receipt_stage
 from team_sync.schemas import AgentAction, AttentionQuery
 from team_sync.workflows import actor_records
 
@@ -28,7 +29,7 @@ MODELS = {
 
 def operations(role, kind):
     if role == "observer":
-        return ["message.ack", "actor.rename", "activity.report"]
+        return ["message.ack", "actor.rename", "activity.report", "resource.update"]
     return [
         name
         for name in get_args(AgentAction.model_fields["operation"].annotation)
@@ -109,6 +110,7 @@ def messages(project, actor):
                 m.Receipt.project_id == project.id,
                 m.Receipt.message_id == m.Message.id,
                 m.Receipt.actor_id == actor.id,
+                m.Receipt.message_version == m.Message.version,
             ),
         )
         .where(
@@ -127,6 +129,7 @@ def sent_messages(project, actor):
                 m.Receipt.project_id == project.id,
                 m.Receipt.message_id == m.Message.id,
                 m.Receipt.actor_id == m.Message.recipient_id,
+                m.Receipt.message_version == m.Message.version,
             ),
         )
         .where(m.Message.project_id == project.id, m.Message.sender_id == actor.id)
@@ -316,14 +319,18 @@ def resource(core, db, project, actor, collection, resource_id, offset=0, limit=
         item = project
     else:
         item = core.get(db, MODELS[collection], project.id, resource_id)
-    if collection == "messages" and item.recipient_id not in (None, actor.id):
+    if (
+        collection == "messages"
+        and item.recipient_id not in (None, actor.id)
+        and item.sender_id != actor.id
+    ):
         from team_sync.core import fail
 
         fail(404, "not_found", "Message not found")
     value = record(item)
     if collection == "messages":
         receipt = db.get(m.Receipt, (project.id, item.id, actor.id))
-        value["ack_stage"] = receipt.stage if receipt else None
+        value["ack_stage"] = receipt_stage(receipt, item)
     if collection == "actors":
         value = actor_records(db, [item])[0]
     related = {}
@@ -345,6 +352,10 @@ def resource(core, db, project, actor, collection, resource_id, offset=0, limit=
     if collection == "artifacts":
         add("tasks", m.Task.artifact_id == item.id)
         add("findings", m.Finding.artifact_id == item.id)
+        add(
+            "artifacts",
+            or_(m.Artifact.supersedes_id == item.id, m.Artifact.id == item.supersedes_id),
+        )
     if collection == "challenges":
         add("tasks", m.Task.challenge_id == item.id)
         add("findings", m.Finding.challenge_id == item.id)
@@ -355,6 +366,7 @@ def resource(core, db, project, actor, collection, resource_id, offset=0, limit=
     return {
         "collection": collection,
         "item": value,
+        "editing": core.editing_info(actor, item, collection),
         "related": related,
         "events_after": project.event_seq,
     }

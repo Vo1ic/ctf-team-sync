@@ -56,6 +56,8 @@ def capabilities(host="generic"):
         "expiring_activity_reports": True,
         "attention": "explicit_query" if host == "generic" else "priority_snapshot_at_checkpoint",
         "connection_file": True,
+        "resource_editing": "versioned_with_history",
+        "message_acknowledgements": "content_version",
         "automatic_context_delivery": "caller_controlled"
         if host == "generic"
         else "lifecycle_checkpoints",

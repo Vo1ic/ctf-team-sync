@@ -37,6 +37,7 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 
 | operation | resource_id | arguments |
 | --- | --- | --- |
+| resource.update | resource | collection, expected_version, changes, reason? |
 | challenge.create | не потрібен | title, description?, category? |
 | task.create | не потрібен | title, description?, challenge_id?, requested_assignee_id? |
 | task.claim | task | expected_version, lease_seconds? |
@@ -56,7 +57,7 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | flag.verify | flag | expected_version, status, method, evidence |
 | submission.create | flag | outcome, evidence |
 | message.send | не потрібен | body, recipient_id?, kind?, priority?, task_id?, group_key?, expires_at?, reply_to_id?, deduplicate? |
-| message.ack | message | stage |
+| message.ack | message | stage, expected_version? (обов'язково для редакцій >1) |
 
 Повні аргументи та enums: `contracts/commands.schema.json` або MCP
 `command_contracts(operation)` для однієї операції. `task.release` атомарно
@@ -82,7 +83,13 @@ coordinator; сервер сам не виконує локальний checker 
 - `GET /projects/{project}/agent-context?limit=5&max_chars=12000` — обмежений
   робочий контекст зі scope `task_id`/`challenge_id`, totals і excerpts.
 - `GET /projects/{project}/resources/{collection}/{id}?offset=0&limit=10` —
-  повний ресурс і пагіновані пов'язані записи. Повідомлення — лише адресату.
+  повний ресурс, `editing` з дозволеними полями та пагіновані пов'язані записи.
+  Приватні повідомлення — відправнику/адресату.
+- `GET /projects/{project}/edit-contracts?collection=...` — схема поля changes
+  для редагування однієї колекції.
+- `GET /projects/{project}/resources/{collection}/{id}/history?offset=0&limit=5&max_chars=12000`
+  — bounded уривки правок із before/after, editor, причиною й changed_fields.
+  Додайте `revision_id` для однієї повної правки. Читання не підтверджує message.
 - `GET /projects/{project}/search?query=...&collection=...&offset=0&limit=20` —
   literal case-insensitive пошук спільних даних і власного inbox. `%`/`_` literal.
 - `GET /projects/{project}/messages/{message}` — одне повідомлення, доступне цьому
@@ -128,6 +135,9 @@ event stream. Отримання події не підтверджує обро
 Додаткові query: `requires_review=false` і `media_type=application/octet-stream`.
 Старі клієнти зберігають спільне завантаження без дозволів; веб завжди передає
 `requires_review=true`. Preview дозволяє лише растрові зображення та plain text.
+Для нової версії додайте `supersedes_id=<previous-artifact>` та його
+`expected_version`. Старі байти залишаються за старим UUID, новий вміст отримує
+новий UUID і власний дозвіл. Для метаданих використовуйте resource.update.
 
 `GET /projects/{project}/artifacts/{artifact}/content` — байти та header
 `X-Content-SHA256`. Перед використанням клієнт перевіряє хеш.

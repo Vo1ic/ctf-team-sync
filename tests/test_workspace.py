@@ -79,7 +79,12 @@ def test_personal_context_is_bounded_scoped_and_does_not_ack(client, project):
     )
     observer = enroll(client, project, role="observer")
     context = get(client, project, "agent-context", observer["token"]).json()
-    assert context["allowed_operations"] == ["message.ack", "actor.rename", "activity.report"]
+    assert context["allowed_operations"] == [
+        "message.ack",
+        "actor.rename",
+        "activity.report",
+        "resource.update",
+    ]
     assert all(
         not task["can_claim"] and task["available_actions"] == []
         for task in context["sections"]["available_tasks"]["items"]
@@ -147,7 +152,12 @@ def test_resource_details_and_search_respect_private_messages_and_literal_query(
     assert (
         len(get(client, project, f"resources/findings/{finding_id}").json()["item"]["body"]) > 1000
     )
-    assert get(client, project, "resources/messages/" + private["id"]).status_code == 404
+    assert get(client, project, "resources/messages/" + private["id"]).json()["editing"]["allowed"]
+    unrelated = enroll(client, project, "Unrelated")
+    assert (
+        get(client, project, "resources/messages/" + private["id"], unrelated["token"]).status_code
+        == 404
+    )
     assert (
         get(client, project, "resources/messages/" + private["id"], peer["token"]).json()["item"][
             "ack_stage"

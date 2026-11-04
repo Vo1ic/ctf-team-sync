@@ -78,6 +78,14 @@ class JSONLBridge:
                 f"resources/{params.collection}/{params.resource_id}",
                 params={"offset": params.offset, "limit": params.limit},
             )
+        if method == "resources/history":
+            return self.receiver.request(
+                "GET",
+                f"resources/{params.collection}/{params.resource_id}/history",
+                params=params.model_dump(exclude={"collection", "resource_id"}, exclude_none=True),
+            )
+        if method == "resources/edit-contract":
+            return self.receiver.request("GET", "edit-contracts", params=params.model_dump())
         raise RPCError(-32601, "Method not found")
 
     @staticmethod

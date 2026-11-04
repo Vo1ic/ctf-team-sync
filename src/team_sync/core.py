@@ -13,6 +13,7 @@ from team_sync import models as m
 from team_sync import schemas as s
 from team_sync.domain import DomainError as DomainError
 from team_sync.domain import digest, fail, record
+from team_sync.editing import EditingOperations, flag_subject, receipt_stage
 from team_sync.settings import Settings
 from team_sync.workflows import WorkflowOperations, actor_records
 
@@ -20,7 +21,7 @@ WRITE_ROLES = {"owner", "coordinator", "worker"}
 LEAD_ROLES = {"owner", "coordinator"}
 
 
-class Core(WorkflowOperations):
+class Core(WorkflowOperations, EditingOperations):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -162,7 +163,10 @@ class Core(WorkflowOperations):
                 )
                 if owners <= 1:
                     fail(409, "last_owner", "The last active owner cannot be revoked")
+            before = record(target)
             target.active = False
+            target.version += 1
+            self._revision(db, project, actor, "actors", target, before, "Access revoked")
             self.emit(db, project, actor, "actor.revoked", {"resource_id": target.id})
             return record(target)
 
@@ -230,7 +234,7 @@ class Core(WorkflowOperations):
             result = []
             for message in messages:
                 receipt = db.get(m.Receipt, (project_id, message.id, actor.id))
-                result.append({**record(message), "ack_stage": receipt.stage if receipt else None})
+                result.append({**record(message), "ack_stage": receipt_stage(receipt, message)})
             return result
 
     def message(self, project_id, token, message_id):
@@ -239,7 +243,7 @@ class Core(WorkflowOperations):
             if message.recipient_id not in (None, actor.id):
                 fail(404, "not_found", "Message not found")
             receipt = db.get(m.Receipt, (project_id, message.id, actor.id))
-            return {**record(message), "ack_stage": receipt.stage if receipt else None}
+            return {**record(message), "ack_stage": receipt_stage(receipt, message)}
 
     def outbox(self, project_id, token, offset=0, limit=100):
         from team_sync.workbench import sent_messages
@@ -255,6 +259,7 @@ class Core(WorkflowOperations):
 
     def execute(self, project_id, token, operation, arguments, resource_id, key):
         handlers: dict[str, tuple[type[s.Input], Callable, set]] = {
+            "resource.update": (s.ResourceEdit, self.edit_resource, WRITE_ROLES | {"observer"}),
             "challenge.create": (s.ChallengeCreate, self.create_challenge, WRITE_ROLES),
             "task.create": (s.TaskCreate, self.create_task, WRITE_ROLES),
             "task.claim": (s.Lease, self.claim, WRITE_ROLES),
@@ -283,6 +288,7 @@ class Core(WorkflowOperations):
         defaults = {
             "task.create": {"requested_assignee_id": None},
             "finding.create": {"artifact_id": None},
+            "message.ack": {"expected_version": None},
             "message.send": {
                 "kind": "note",
                 "priority": "normal",
@@ -315,13 +321,16 @@ class Core(WorkflowOperations):
                 "priority",
                 "kind",
                 "approval_status",
+                "message_version",
             ):
                 if field in response:
                     payload[field] = response[field]
             payload["resource_type"] = result.__tablename__
             if isinstance(result, m.Task) and result.artifact_id:
                 payload["artifact_id"] = result.artifact_id
-            if operation != "activity.report":  # _activity already wrote its atomic update event.
+            if hasattr(result, "_revision_id"):
+                payload["revision_id"] = result._revision_id
+            if operation != "activity.report" and not getattr(result, "_skip_command_event", False):
                 self.emit(db, project, actor, getattr(result, "_event_type", operation), payload)
             db.add(
                 m.Command(
@@ -514,6 +523,7 @@ class Core(WorkflowOperations):
             m.Verification,
             flag_id=flag.id,
             author_id=actor.id,
+            subject=flag_subject(flag),
             status=data.status,
             method=data.method,
             evidence=data.evidence,
@@ -530,7 +540,7 @@ class Core(WorkflowOperations):
         return flag
 
     def create_submission(self, db, project, actor, data, resource_id):
-        self.get(db, m.Flag, project.id, resource_id)
+        flag = self.get(db, m.Flag, project.id, resource_id)
         # This records a reported outcome; it never sends flags to a CTF platform.
         return self.insert(
             db,
@@ -538,6 +548,7 @@ class Core(WorkflowOperations):
             m.Submission,
             flag_id=resource_id,
             author_id=actor.id,
+            subject=flag_subject(flag),
             **data.model_dump(),
         )
 
@@ -552,16 +563,33 @@ class Core(WorkflowOperations):
         message = self.get(db, m.Message, project.id, resource_id)
         if message.recipient_id not in (None, actor.id):
             fail(404, "not_found", "Message not found")
+        if data.expected_version is not None:
+            self.check_version(message, data.expected_version)
+        elif message.version > 1:
+            fail(
+                409,
+                "message_version_required",
+                "Read the edited message and acknowledge its version",
+            )
         receipt = db.get(m.Receipt, (project.id, message.id, actor.id))
         if receipt is None:
             receipt = m.Receipt(
-                project_id=project.id, message_id=message.id, actor_id=actor.id, stage=data.stage
+                project_id=project.id,
+                message_id=message.id,
+                actor_id=actor.id,
+                stage=data.stage,
+                message_version=message.version,
             )
             db.add(receipt)
-        elif receipt.stage == "processed" and data.stage == "received":
+        elif (
+            receipt.message_version == message.version
+            and receipt.stage == "processed"
+            and data.stage == "received"
+        ):
             fail(409, "receipt_regression", "A processed receipt cannot move backwards")
         else:
             receipt.stage, receipt.updated_at = data.stage, m.now()
+            receipt.message_version = message.version
         return receipt
 
     def add_artifact(
@@ -574,17 +602,42 @@ class Core(WorkflowOperations):
         key,
         requires_review=False,
         media_type="application/octet-stream",
+        supersedes_id=None,
+        expected_version=None,
     ):
         with self.context(project_id, token, write=True, roles=WRITE_ROLES) as (db, project, actor):
+            if expected_version is not None and supersedes_id is None:
+                fail(
+                    422, "artifact_source_required", "Choose the previous artifact for this version"
+                )
             fields = ["artifact.publish", name, sha256, size]
             if requires_review or media_type != "application/octet-stream":
                 fields += [{"requires_review": requires_review, "media_type": media_type}]
+            if supersedes_id:
+                fields += [{"supersedes_id": supersedes_id, "expected_version": expected_version}]
             fingerprint = digest(json.dumps(fields))
             previous = db.get(m.Command, (project_id, actor.id, key))
             if previous is not None:
                 if previous.fingerprint != fingerprint:
                     fail(409, "idempotency_conflict", "Key was already used for another command")
                 return previous.response
+            source = None
+            if supersedes_id:
+                source = self.get(db, m.Artifact, project_id, supersedes_id)
+                self.edit_permission(actor, source, "artifacts", {})
+                if expected_version is None:
+                    fail(422, "version_required", "The previous artifact version is required")
+                self.check_version(source, expected_version)
+                successor = db.scalar(
+                    select(m.Artifact.id).where(
+                        m.Artifact.project_id == project_id, m.Artifact.supersedes_id == source.id
+                    )
+                )
+                if successor:
+                    fail(
+                        409, "artifact_superseded", f"Edit the latest artifact instead: {successor}"
+                    )
+                requires_review = requires_review or source.requires_review
             artifact = self.insert(
                 db,
                 project,
@@ -595,7 +648,31 @@ class Core(WorkflowOperations):
                 author_id=actor.id,
                 requires_review=requires_review,
                 media_type=media_type,
+                supersedes_id=supersedes_id,
             )
+            if source:
+                before = record(source)
+                source.version += 1
+                self._revision(
+                    db,
+                    project,
+                    actor,
+                    "artifacts",
+                    source,
+                    before,
+                    f"New immutable content version: artifact:{artifact.id}",
+                )
+                self.emit(
+                    db,
+                    project,
+                    actor,
+                    "artifact.update",
+                    {
+                        "resource_id": source.id,
+                        "version": source.version,
+                        "successor_id": artifact.id,
+                    },
+                )
             self.emit(db, project, actor, "artifact.published", {"resource_id": artifact.id})
             response = record(artifact)
             db.add(

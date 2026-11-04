@@ -120,7 +120,7 @@ For a host supporting stdio MCP, the configuration contains:
   "mcpServers": {
     "team-sync": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.3.0", "team-sync-mcp"],
+      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.4.0", "team-sync-mcp"],
       "env": {
         "TEAM_SYNC_URL": "https://team-sync.example.org",
         "TEAM_SYNC_PROJECT_ID": "<project-uuid>",
@@ -148,6 +148,13 @@ Protected bytes unlock after approval and an explicit start. The agent publishes
 a README with authorship. Unusable material is archived with a reason and remains
 recoverable by a human. Analysis runs in the connected agent's CLI/IDE.
 See [human workflows and attention](docs/adr/0003-human-reviews-and-agent-attention.md).
+
+Every working record has **Редагувати** and **Історія правок** where your role
+permits it. Agents use `get_edit_contract`, `edit_resource`, and `get_edit_history`
+over the same API; JSONL exposes the same commands. Edits preserve authorship and
+before/after history, reject concurrent overwrites, and require new acknowledgements
+for edited messages. File/text changes publish linked immutable versions.
+See [versioned editing](docs/adr/0004-versioned-resource-editing.md).
 
 For context delivery without agent-initiated polling, see [Agent adapters](docs/ADAPTERS.md).
 The receiver runs with `uv run team-sync-agent watch`; `codex-config` prints hook

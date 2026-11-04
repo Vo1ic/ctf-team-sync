@@ -356,6 +356,7 @@ def test_hook_attention_bypasses_fifo_backlog_without_changing_jsonl_packets(set
     assert len(json.dumps(items, ensure_ascii=False)) <= 6000
     spool.hook_emitted("claude:session", cursor, ids)
     spool.close()
+
     spool = Spool(settings)
     assert not any(item.get("message") for item in spool.hook_batch("claude:session")[0])
     spool.replay("claude:session")
@@ -374,6 +375,62 @@ def test_hook_attention_bypasses_fifo_backlog_without_changing_jsonl_packets(set
     )
     assert spool.hook_batch("new-session")[2] == []
     spool.close()
+
+
+def test_receiver_redelivers_edited_message_and_invalidates_old_pending_packet(
+    client,
+    project,
+    live_server,
+    tmp_path,
+):
+    actor = enroll(client, project)
+    message = execute(
+        client,
+        project,
+        "message.send",
+        {"body": "Version one", "recipient_id": actor["actor"]["id"]},
+    ).json()
+    config = AgentSettings(
+        live_server, project["project"]["id"], actor["token"], tmp_path / "edited.db"
+    )
+    spool = Spool(config)
+    receiver = Receiver(config, spool)
+    try:
+        receiver.poll(0)
+        items, cursor, ids = spool.hook_batch("same-session")
+        assert items[0]["message"]["body"] == "Version one"
+        spool.hook_emitted("same-session", cursor, ids)
+        packet = spool.read_context("generic")
+        assert packet["items"][0]["message"]["body"] == "Version one"
+        execute(
+            client, project, "message.ack", {"stage": "processed"}, message["id"], actor["token"]
+        )
+        changed = execute(
+            client,
+            project,
+            "resource.update",
+            {
+                "collection": "messages",
+                "expected_version": message["version"],
+                "changes": {"body": "Version two"},
+            },
+            message["id"],
+        ).json()
+        receiver.poll(0)
+        with pytest.raises(DeliveryError):
+            spool.ack_context("generic", packet["delivery_id"])
+        updated = spool.read_context("generic")
+        assert updated["items"][0]["message"]["body"] == "Version two"
+        second, _, keys = spool.hook_batch("same-session")
+        assert second[0]["message"]["version"] == 2 and keys == [message["id"] + ":v2"]
+        stored = client.get(
+            f"/api/v1/projects/{project['project']['id']}/messages/{message['id']}",
+            headers=headers(actor["token"]),
+        ).json()
+        assert stored["ack_stage"] == "received" and changed["version"] == stored["version"]
+    finally:
+        receiver.close()
+        spool.close()
 
 
 def test_hook_failure_is_nonblocking_and_does_not_echo_input():

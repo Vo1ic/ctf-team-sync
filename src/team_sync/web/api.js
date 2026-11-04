@@ -198,10 +198,17 @@ export class ApiClient {
     }
   }
 
-  async upload(file, key, { requiresReview = false } = {}) {
+  async upload(
+    file,
+    key,
+    { requiresReview = false, supersedesId, expectedVersion } = {},
+  ) {
+    const revision = supersedesId
+      ? `&supersedes_id=${encodeURIComponent(supersedesId)}&expected_version=${expectedVersion}`
+      : "";
     return this.request(
       this.path(
-        `artifacts?name=${encodeURIComponent(file.name)}&requires_review=${requiresReview}&media_type=${encodeURIComponent(file.type || "application/octet-stream")}`,
+        `artifacts?name=${encodeURIComponent(file.name)}&requires_review=${requiresReview}&media_type=${encodeURIComponent(file.type || "application/octet-stream")}${revision}`,
       ),
       {
         method: "POST",

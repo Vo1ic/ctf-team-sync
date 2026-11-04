@@ -4,6 +4,18 @@ Team Sync не визначає модель, провайдера, ОС або 
 і JSONL читають один узгоджений стан і виконують ті самі доменні команди.
 Кожен незалежний виконавець отримує власний проєктний доступ.
 
+Виправлення даних: `get_resource` повертає поточну version та editing.fields;
+`get_edit_contract(collection)` описує типи. `edit_resource` приймає лише змінені
+поля, поточну expected_version та ідемпотентний ключ. `get_edit_history` показує
+уривки правок; revision_id явно читає повну правку. Первинний автор зберігається,
+editor фіксується окремо. Після конфлікту перечитайте запис, не перезаписуйте
+чужу роботу старим станом.
+
+Новий текст/байти файла публікуйте через publish_artifact із supersedes_id та
+expected_version джерела; попередній файл не зникає. Ack відредагованого message
+передає expected_version прочитаного вмісту. Після оновлення до 0.4 перезапустіть
+MCP/receiver: cache переходить у schema 2 зі збереженням подій та курсора.
+
 З 0.3 `get_attention` показує актуальні повідомлення з пріоритетами, TTL і
 згортанням typed status; повна історія залишається в inbox. `report_activity`
 повідомляє поточний крок з TTL: не поновлюйте його, якщо модель вже не працює.
@@ -23,7 +35,7 @@ Team Sync не визначає модель, провайдера, ОС або 
 
 У вебінтерфейсі: **Підключення → Підключити агента**. Збережіть MCP-конфігурацію,
 універсальний файл доступу та стартову інструкцію. За замовчуванням MCP
-використовує `uvx` із пакетом із Git tag `v0.3.0`; checkout і ручний локальний
+використовує `uvx` із пакетом із Git tag `v0.4.0`; checkout і ручний локальний
 шлях не потрібні. Потрібен встановлений uv. Для розробки можна вибрати
 запуск із локального checkout і вказати шлях на пристрої агента.
 
@@ -45,7 +57,7 @@ uv run team-sync-agent --access-file /private/team-sync-access.json hook-config 
 Ті самі команди без checkout:
 
 ```sh
-uvx --from git+https://github.com/Vo1ic/ctf-team-sync@v0.3.0 team-sync-agent --access-file /private/team-sync-access.json bridge
+uvx --from git+https://github.com/Vo1ic/ctf-team-sync@v0.4.0 team-sync-agent --access-file /private/team-sync-access.json bridge
 ```
 
 На Windows використовуйте свій шлях до файла. HTTP-клієнту Python або uv не потрібні.

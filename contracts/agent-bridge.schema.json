@@ -29,6 +29,7 @@
       "properties": {
         "operation": {
           "enum": [
+            "resource.update",
             "challenge.create",
             "task.create",
             "task.claim",
@@ -168,6 +169,33 @@
       "title": "ClientInfo",
       "type": "object"
     },
+    "EditContract": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "enum": [
+            "projects",
+            "actors",
+            "challenges",
+            "tasks",
+            "findings",
+            "flags",
+            "verifications",
+            "submissions",
+            "artifacts",
+            "messages",
+            "activities"
+          ],
+          "title": "Collection",
+          "type": "string"
+        }
+      },
+      "required": [
+        "collection"
+      ],
+      "title": "EditContract",
+      "type": "object"
+    },
     "GetResource": {
       "additionalProperties": false,
       "properties": {
@@ -235,6 +263,72 @@
         "client"
       ],
       "title": "Hello",
+      "type": "object"
+    },
+    "History": {
+      "additionalProperties": false,
+      "properties": {
+        "collection": {
+          "enum": [
+            "projects",
+            "actors",
+            "challenges",
+            "tasks",
+            "findings",
+            "flags",
+            "verifications",
+            "submissions",
+            "artifacts",
+            "messages",
+            "activities"
+          ],
+          "title": "Collection",
+          "type": "string"
+        },
+        "resource_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 5,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "revision_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision Id"
+        },
+        "max_chars": {
+          "default": 12000,
+          "maximum": 32000,
+          "minimum": 4000,
+          "title": "Max Chars",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection",
+        "resource_id"
+      ],
+      "title": "History",
       "type": "object"
     },
     "Inbox": {
@@ -821,6 +915,48 @@
       "title": "protocol_helloRequest",
       "type": "object"
     },
+    "resources_edit-contractRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "resources/edit-contract",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/EditContract"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "resources_edit-contractRequest",
+      "type": "object"
+    },
     "resources_getRequest": {
       "additionalProperties": false,
       "properties": {
@@ -861,6 +997,48 @@
         "params"
       ],
       "title": "resources_getRequest",
+      "type": "object"
+    },
+    "resources_historyRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "resources/history",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/History"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "resources_historyRequest",
       "type": "object"
     },
     "resources_searchRequest": {
@@ -959,7 +1137,9 @@
       "messages/inbox": "#/$defs/messages_inboxRequest",
       "messages/outbox": "#/$defs/messages_outboxRequest",
       "protocol/hello": "#/$defs/protocol_helloRequest",
+      "resources/edit-contract": "#/$defs/resources_edit-contractRequest",
       "resources/get": "#/$defs/resources_getRequest",
+      "resources/history": "#/$defs/resources_historyRequest",
       "resources/search": "#/$defs/resources_searchRequest",
       "workspace/context": "#/$defs/workspace_contextRequest"
     },
@@ -998,6 +1178,12 @@
     },
     {
       "$ref": "#/$defs/resources_getRequest"
+    },
+    {
+      "$ref": "#/$defs/resources_historyRequest"
+    },
+    {
+      "$ref": "#/$defs/resources_edit-contractRequest"
     },
     {
       "$ref": "#/$defs/resources_searchRequest"

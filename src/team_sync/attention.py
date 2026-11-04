@@ -7,6 +7,23 @@ from sqlalchemy import and_, case, exists, func, or_, select
 
 from team_sync import models as m
 from team_sync.domain import digest, fail, record
+from team_sync.editing import receipt_stage
+
+
+def message_budget(db, project, actor, priority):
+    timestamp = db.scalar(select(func.clock_timestamp()))
+    sends = select(m.Event).where(
+        m.Event.project_id == project.id,
+        m.Event.actor_id == actor.id,
+        m.Event.created_at > timestamp - timedelta(seconds=60),
+        m.Event.type.in_(["message.send", "message.duplicate", "message.update"]),
+    )
+    if db.scalar(select(func.count()).select_from(sends.subquery())) >= 120:
+        fail(429, "message_rate_limit", "Too many messages; wait 60 seconds")
+    if priority == "urgent":
+        urgent = sends.where(m.Event.payload["priority"].as_string() == "urgent")
+        if db.scalar(select(func.count()).select_from(urgent.subquery())) >= 20:
+            fail(429, "urgent_rate_limit", "Urgent-message budget exhausted; wait 60 seconds")
 
 
 def create_message(core, db, project, actor, data):
@@ -27,18 +44,7 @@ def create_message(core, db, project, actor, data):
         parent_id, depth = parent.reply_to_id, depth + 1
         if depth >= 8:
             fail(409, "reply_limit", "Summarize this thread before starting a new exchange")
-    sends = select(m.Event).where(
-        m.Event.project_id == project.id,
-        m.Event.actor_id == actor.id,
-        m.Event.created_at > timestamp - timedelta(seconds=60),
-        m.Event.type.in_(["message.send", "message.duplicate"]),
-    )
-    if db.scalar(select(func.count()).select_from(sends.subquery())) >= 120:
-        fail(429, "message_rate_limit", "Too many messages; wait 60 seconds")
-    if data.priority == "urgent":
-        urgent = sends.where(m.Event.payload["priority"].as_string() == "urgent")
-        if db.scalar(select(func.count()).select_from(urgent.subquery())) >= 20:
-            fail(429, "urgent_rate_limit", "Urgent-message budget exhausted; wait 60 seconds")
+    message_budget(db, project, actor, data.priority)
     values = data.model_dump(mode="json", exclude={"deduplicate"})
     fingerprint = digest(json.dumps(values, sort_keys=True, ensure_ascii=False))
     if data.deduplicate:
@@ -138,6 +144,7 @@ def attention(db, project, actor, query):
                 m.Receipt.project_id == project.id,
                 m.Receipt.message_id == ranked.c.id,
                 m.Receipt.actor_id == actor.id,
+                m.Receipt.message_version == ranked.c.version,
             ),
         )
         .where(
@@ -182,7 +189,7 @@ def attention(db, project, actor, query):
     result = []
     for message in ordered[query.offset : query.offset + query.limit]:
         receipt = db.get(m.Receipt, (project.id, message.id, actor.id))
-        item = {**record(message), "ack_stage": receipt.stage if receipt else None}
+        item = {**record(message), "ack_stage": receipt_stage(receipt, message)}
         item["body"] = message.body[:2000]
         item["body_truncated"] = len(message.body) > 2000
         item["resource"] = f"messages/{message.id}"

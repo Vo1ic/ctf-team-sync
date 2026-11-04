@@ -16,6 +16,20 @@ LeaseSeconds = Annotated[int, Field(ge=10, le=3600)]
 ContextLimit = Annotated[int, Field(ge=1, le=20)]
 ContextBudget = Annotated[int, Field(ge=4000, le=32000)]
 
+ResourceCollection = Literal[
+    "projects",
+    "actors",
+    "challenges",
+    "tasks",
+    "findings",
+    "flags",
+    "verifications",
+    "submissions",
+    "artifacts",
+    "messages",
+    "activities",
+]
+
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -158,6 +172,7 @@ class MessageCreate(Input):
 
 
 class MessageAck(Input):
+    expected_version: Version | None = None
     stage: Literal["received", "processed"]
 
 
@@ -176,6 +191,7 @@ class AgentAction(Input):
     """Transport-independent MCP command envelope."""
 
     operation: Literal[
+        "resource.update",
         "challenge.create",
         "task.create",
         "task.claim",
@@ -206,6 +222,7 @@ class AgentAction(Input):
         if (
             self.operation
             in {
+                "resource.update",
                 "task.claim",
                 "task.renew",
                 "task.complete",
@@ -227,21 +244,6 @@ class AgentAction(Input):
         return self
 
 
-ResourceCollection = Literal[
-    "projects",
-    "actors",
-    "challenges",
-    "tasks",
-    "findings",
-    "flags",
-    "verifications",
-    "submissions",
-    "artifacts",
-    "messages",
-    "activities",
-]
-
-
 class WorkspaceQuery(Input):
     challenge_id: ID | None = None
     task_id: ID | None = None
@@ -260,3 +262,91 @@ class AttentionQuery(Input):
     offset: int = Field(default=0, ge=0, le=10000)
     limit: int = Field(default=20, ge=1, le=50)
     max_chars: ContextBudget = 12000
+
+
+class ResourceEdit(Input):
+    collection: ResourceCollection
+    expected_version: Version
+    changes: dict = Field(min_length=1, max_length=20)
+    reason: str = Field(default="", max_length=10000)
+
+
+class ProjectFields(Input):
+    name: Title = None
+    profile: Literal["jeopardy", "attack_defense", "custom"] = None
+    capabilities: dict[str, bool] = None
+    rules: Annotated[str, Field(max_length=100000)] = None
+
+
+class ActorFields(Input):
+    name: Title = None
+    role: Role = None
+    capabilities: Annotated[list[Title], Field(max_length=100)] = None
+    owner_id: ID | None = None
+    active: bool = None
+
+
+class ChallengeFields(Input):
+    title: Title = None
+    description: Annotated[str, Field(max_length=100000)] = None
+    category: Annotated[str, Field(max_length=100)] | None = None
+
+
+class TaskFields(Input):
+    title: Title = None
+    description: Annotated[str, Field(max_length=100000)] = None
+    challenge_id: ID | None = None
+    requested_assignee_id: ID | None = None
+    status: Literal["open", "done"] = None
+    result: Annotated[str, Field(max_length=100000)] | None = None
+
+
+class FindingFields(Input):
+    title: Title = None
+    body: Body = None
+    evidence: Body = None
+    kind: Literal["observation", "hypothesis", "result", "failed_attempt"] = None
+    challenge_id: ID | None = None
+    task_id: ID | None = None
+    artifact_id: ID | None = None
+
+
+class FlagFields(Input):
+    value: Annotated[str, Field(min_length=1, max_length=4096, pattern=r"\S")] = None
+    challenge_id: ID | None = None
+    target: Title | None = None
+    round: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    expires_at: AwareDatetime | None = None
+
+
+class VerificationFields(Input):
+    status: Literal["confirmed", "rejected"] = None
+    method: Literal["manual", "local_checker", "platform"] = None
+    evidence: Body = None
+
+
+class SubmissionFields(Input):
+    outcome: Literal["accepted", "rejected", "unknown"] = None
+    evidence: Body = None
+
+
+class MessageFields(Input):
+    body: Body = None
+    kind: Literal["note", "question", "assignment", "status", "approval", "result"] = None
+    priority: Literal["normal", "urgent"] = None
+    task_id: ID | None = None
+    group_key: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    expires_at: AwareDatetime | None = None
+
+
+class ArtifactFields(Input):
+    name: Annotated[str, Field(min_length=1, max_length=255, pattern=r"^[^/\\\x00-\x1f]+$")] = None
+    media_type: Annotated[str, Field(min_length=1, max_length=120)] = None
+    requires_review: bool = None
+
+
+class ActivityFields(Input):
+    state: Literal["idle", "working", "waiting_human", "blocked", "ready"] = None
+    detail: Annotated[str, Field(max_length=300)] = None
+    task_id: ID | None = None
+    ttl_seconds: Annotated[int, Field(ge=30, le=600)] = None

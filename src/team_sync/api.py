@@ -70,7 +70,7 @@ def create_app(settings: Settings | None = None):
         yield
         core.engine.dispose()
 
-    app = FastAPI(title="CTF Team Sync", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="CTF Team Sync", version="0.4.0", lifespan=lifespan)
     app.state.core = core
 
     @app.middleware("http")
@@ -221,6 +221,28 @@ def create_app(settings: Settings | None = None):
     ):
         return {"items": core.inbox(project_id, token, offset, limit)}
 
+    @app.get("/api/v1/projects/{project_id}/resources/{collection}/{resource_id}/history")
+    def history(
+        project_id: s.ID,
+        collection: s.ResourceCollection,
+        resource_id: s.ID,
+        token: Token,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=20)] = 5,
+        revision_id: s.ID | None = None,
+        max_chars: Annotated[int, Query(ge=4000, le=32000)] = 12000,
+    ):
+        return core.edit_history(
+            project_id, token, collection, resource_id, offset, limit, revision_id, max_chars
+        )
+
+    @app.get("/api/v1/projects/{project_id}/edit-contracts")
+    def edit_contract(project_id: s.ID, token: Token, collection: s.ResourceCollection):
+        from team_sync.editing import FIELDS
+
+        with core.context(project_id, token):
+            return {"collection": collection, "changes": FIELDS[collection].model_json_schema()}
+
     @app.get("/api/v1/projects/{project_id}/attention")
     def attention(project_id: s.ID, token: Token, query: Annotated[s.AttentionQuery, Query()]):
         return core.attention(project_id, token, query)
@@ -309,6 +331,8 @@ def create_app(settings: Settings | None = None):
         media_type: Annotated[
             str, Query(min_length=1, max_length=120)
         ] = "application/octet-stream",
+        supersedes_id: s.ID | None = None,
+        expected_version: Annotated[int | None, Query(ge=1)] = None,
     ):
         def authorize():
             with core.context(project_id, token, roles=WRITE_ROLES):
@@ -356,6 +380,8 @@ def create_app(settings: Settings | None = None):
                     idempotency_key,
                     requires_review,
                     media_type,
+                    supersedes_id,
+                    expected_version,
                 )
             finally:
                 temp_path.unlink(missing_ok=True)

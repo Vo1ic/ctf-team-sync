@@ -66,12 +66,20 @@ replace the authenticated actor. Unsupported versions fail before domain actions
 | `messages/attention` | offset?, limit?, max_chars? | Bounded pending messages in priority/sender order; status grouping and expiry |
 | `workspace/context` | task_id?, challenge_id?, limit?, max_chars? | Bounded current working state, separate from durable delivery packets |
 | `resources/get` | collection, resource_id, offset?, limit? | Full current resource and paginated related evidence |
+| `resources/edit-contract` | collection | Editable field schema; use resource.editing for your permissions |
+| `resources/history` | collection, resource_id, offset?, limit?, max_chars?, revision_id? | Bounded edit history, or one explicit full revision |
 | `resources/search` | query, collection?, offset?, limit? | Search shared knowledge and your inbox |
 
 Context defaults to 12 items and a 6,000-character JSON items budget. A host can
 request 1..50 items and 1,024..20,000 characters to fit its own model. Pending
 packets remain stable; changed budgets apply after acknowledgement or replay.
 The items budget excludes the small delivery envelope.
+
+`commands/execute` supports `resource.update` with collection, expected_version,
+changes and an optional reason. Message acknowledgements after an edit require
+the version actually read. Edited messages invalidate an older pending delivery
+packet; reread context and handle its new delivery_id. Cache schema 2 preserves
+previous events/cursors during upgrade; restart older adapter processes.
 
 A separate `watch` process can keep the cache up to date, or the runtime can call
 `events/sync` itself, including long polling. The model needs no transport logic.

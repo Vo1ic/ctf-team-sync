@@ -140,7 +140,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   const config = JSON.parse(await readFile(await download.path(), "utf8"));
   expect(config.mcpServers["team-sync"].env.TEAM_SYNC_TOKEN).toBe(agentToken);
   expect(config.mcpServers["team-sync"].command).toBe("uvx");
-  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.3.0");
+  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.4.0");
   await page.getByLabel("Запуск MCP", { exact: true }).selectOption("local");
   await page
     .getByLabel("Репозиторій на пристрої агента")
@@ -1014,4 +1014,216 @@ test("attention excerpts open complete messages without acknowledging them", asy
     })
   ).json();
   expect(inbox.items[0].ack_stage).toBeNull();
+});
+
+test("project settings and edit history are available without another login", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  const tools = page.locator(
+    '.record-tools[data-resource-collection="projects"]',
+  );
+  await tools.getByRole("button", { name: "Редагувати", exact: true }).click();
+  await page.getByLabel("Назва", { exact: true }).fill("Edited human CTF");
+  await page
+    .getByLabel("Правила та контекст", { exact: true })
+    .fill("Corrected scope and team rules");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Edited human CTF", exact: true }),
+  ).toBeVisible();
+  await tools
+    .getByRole("button", { name: "Історія правок", exact: true })
+    .click();
+  await expect(page.locator("#modal")).toContainText(ctf.project.name);
+  await expect(
+    page.getByRole("heading", { name: "Історія правок", exact: true }),
+  ).toBeInViewport();
+  await expect(page.locator("#modal")).toContainText(
+    "Corrected scope and team rules",
+  );
+});
+
+test("a conflicting edit keeps the human draft and never overwrites newer work", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const task = await command(request, ctf, "task.create", {
+    title: "Editable task",
+  });
+  await join(page, ctf);
+  await section(page, "Роботи");
+  await page
+    .getByRole("button", { name: "Editable task", exact: true })
+    .click();
+  await page
+    .locator("#modal")
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page.getByLabel("Назва", { exact: true }).fill("My preserved draft");
+  await command(
+    request,
+    ctf,
+    "resource.update",
+    {
+      collection: "tasks",
+      expected_version: task.version,
+      changes: { title: "New remote title" },
+    },
+    task.id,
+  );
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Інший учасник уже змінив",
+  );
+  await expect(page.getByLabel("Назва", { exact: true })).toHaveValue(
+    "My preserved draft",
+  );
+  const res = await (
+    await request.get(
+      `/api/v1/projects/${ctf.project.id}/resources/tasks/${task.id}`,
+      { headers: { Authorization: `Bearer ${ctf.token}` } },
+    )
+  ).json();
+  expect(res.item.title).toBe("New remote title");
+});
+
+test("editing artifact text publishes a linked version and preserves the original bytes", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  await section(page, "Файли");
+  await page.getByRole("button", { name: "Додати текст", exact: true }).click();
+  await page.getByLabel("Назва", { exact: true }).fill("Versioned note");
+  await page
+    .getByLabel("Текст", { exact: true })
+    .fill("Original evidence body");
+  await page
+    .getByRole("button", { name: "Додати й запропонувати аналіз", exact: true })
+    .click();
+  const originalCard = page
+    .locator(".artifact-card")
+    .filter({ hasText: "Versioned note.txt" });
+  const oldId = await originalCard.getAttribute("data-artifact-id");
+  await originalCard
+    .getByRole("button", { name: "Відкрити", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Редагувати текст", exact: true })
+    .click();
+  await page
+    .getByLabel("Вміст", { exact: true })
+    .fill("Corrected evidence body");
+  await page
+    .getByLabel("Запропонувати аналіз нової версії", { exact: true })
+    .uncheck();
+  await page
+    .getByRole("button", { name: "Зберегти нову версію", exact: true })
+    .click();
+  await expect(page.locator(".artifact-card")).toHaveCount(2);
+  const items = (
+    await (
+      await request.get(
+        `/api/v1/projects/${ctf.project.id}/collections/artifacts`,
+        { headers: { Authorization: `Bearer ${ctf.token}` } },
+      )
+    ).json()
+  ).items;
+  const next = items.find((item) => item.supersedes_id === oldId);
+  expect(next.requires_review).toBe(true);
+  const content = async (id) =>
+    (
+      await request.get(
+        `/api/v1/projects/${ctf.project.id}/artifacts/${id}/content`,
+        { headers: { Authorization: `Bearer ${ctf.token}` } },
+      )
+    ).text();
+  expect(await content(oldId)).toBe("Original evidence body");
+  expect(await content(next.id)).toBe("Corrected evidence body");
+  await page
+    .locator(`.artifact-card[data-artifact-id="${next.id}"]`)
+    .getByRole("button", { name: "Відкрити", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Попередня версія", exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("edited private messages need a fresh recipient acknowledgement", async ({
+  page,
+  request,
+  browser,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const expiry = new Date(Date.now() + 3600123).toISOString();
+  const message = await command(request, ctf, "message.send", {
+    body: "Original private body",
+    recipient_id: agent.actor.id,
+    expires_at: expiry,
+  });
+  await command(
+    request,
+    ctf,
+    "message.ack",
+    { stage: "processed" },
+    message.id,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Повідомлення");
+  await page.getByRole("button", { name: "Надіслані", exact: true }).click();
+  await page
+    .locator(`.message-card[data-message-id="${message.id}"]`)
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page
+    .getByLabel("Текст", { exact: true })
+    .fill("Corrected private body");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  const card = page.locator(`.message-card[data-message-id="${message.id}"]`);
+  await expect(card).toContainText("Чекає підтвердження адресата");
+  const inbox = (
+    await (
+      await request.get(`/api/v1/projects/${ctf.project.id}/inbox`, {
+        headers: { Authorization: `Bearer ${agent.token}` },
+      })
+    ).json()
+  ).items;
+  expect(new Date(inbox[0].expires_at).getTime()).toBe(
+    new Date(expiry).getTime(),
+  );
+  const context = await browser.newContext();
+  try {
+    const recipient = await context.newPage();
+    await join(recipient, ctf, agent.token);
+    await section(recipient, "Повідомлення");
+    const incoming = recipient.locator(
+      `.message-card[data-message-id="${message.id}"]`,
+    );
+    await expect(incoming).toContainText("Corrected private body");
+    await incoming
+      .getByRole("button", { name: "Опрацьовано", exact: true })
+      .click();
+    await expect(card).toContainText("Адресат опрацював");
+  } finally {
+    await context.close();
+  }
 });

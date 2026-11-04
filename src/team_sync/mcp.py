@@ -41,6 +41,9 @@ mcp = FastMCP(
         "Use get_attention between steps; status groups and expiry reduce inbox noise. "
         "Report activity honestly. Protected artifacts require request_artifact_review, "
         "a HUMAN decision, then update_artifact_review(start) before fetch_artifact. "
+        "For corrections, get_resource and get_edit_contract, then edit_resource with the "
+        "current version; get_edit_history preserves provenance. Edited messages require "
+        "expected_version when acknowledging. Upload new file bytes with supersedes_id. "
         "wait_events waits cooperatively; it cannot interrupt or awaken your host. "
         "Event cursors are separate from bootstrap; start at 0 for a full replay."
     ),
@@ -264,6 +267,66 @@ async def update_artifact_review(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_edit_contract(collection: s.ResourceCollection, ctx: Context) -> dict:
+    """Read editable fields/types before an edit. get_resource reports your allowed fields."""
+    return result(await client(ctx).get("edit-contracts", params={"collection": collection}))
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=True))
+async def edit_resource(
+    collection: s.ResourceCollection,
+    resource_id: s.ID,
+    expected_version: s.Version,
+    changes: dict,
+    idempotency_key: s.CommandKey,
+    ctx: Context,
+    reason: str = "",
+) -> dict:
+    """Edit current content with optimistic version checks and immutable before/after history.
+
+    Get current version/allowed fields with get_resource; inspect get_edit_contract.
+    Preserve provenance, roles, task leases and human approval. New file bytes use
+    publish_artifact(supersedes_id, expected_version), not this metadata editor.
+    Message edits need new version-specific acknowledgements; flag value/scope edits
+    reset confirmation. Reuse the exact key/arguments after an uncertain response.
+    """
+    args = s.ResourceEdit(
+        collection=collection, expected_version=expected_version, changes=changes, reason=reason
+    )
+    return await command(
+        s.AgentAction(
+            operation="resource.update",
+            resource_id=resource_id,
+            arguments=args.model_dump(mode="json"),
+            idempotency_key=idempotency_key,
+        ),
+        ctx,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_edit_history(
+    collection: s.ResourceCollection,
+    resource_id: s.ID,
+    ctx: Context,
+    offset: int = 0,
+    limit: int = 5,
+    max_chars: s.ContextBudget = 12000,
+    revision_id: s.ID | None = None,
+) -> dict:
+    """Read bounded edit summaries with editor/provenance; revision_id reads one full revision.
+
+    Reading never acknowledges a message. Private message history keeps its recipient scope.
+    """
+    params = {"offset": offset, "limit": limit, "max_chars": max_chars}
+    if revision_id:
+        params["revision_id"] = revision_id
+    return result(
+        await client(ctx).get(f"resources/{collection}/{resource_id}/history", params=params)
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def outbox(ctx: Context, offset: int = 0, limit: int = 100) -> dict:
     """Read your sent messages and explicit recipient receipt stages. This is not model presence."""
     return result(await client(ctx).get("outbox", params={"offset": offset, "limit": limit}))
@@ -305,7 +368,7 @@ async def get_resource(
 ) -> dict:
     """Read complete text/current versions and paginated related evidence or flag history.
 
-    Private messages remain recipient-only. Read never acknowledges processing.
+    Private messages remain sender/recipient-only. Read never acknowledges processing.
     """
     return result(
         await client(ctx).get(
@@ -434,13 +497,17 @@ async def acknowledge_message(
     stage: Literal["received", "processed"],
     idempotency_key: s.CommandKey,
     ctx: Context,
+    expected_version: s.Version | None = None,
 ) -> dict:
-    """Confirm delivery (received) or that you acted on your message (processed)."""
+    """Confirm delivery/processing of the version you read.
+
+    Edited messages require expected_version.
+    """
     return await command(
         s.AgentAction(
             operation="message.ack",
             resource_id=message_id,
-            arguments={"stage": stage},
+            arguments={"stage": stage, "expected_version": expected_version},
             idempotency_key=idempotency_key,
         ),
         ctx,
@@ -449,22 +516,36 @@ async def acknowledge_message(
 
 @mcp.tool()
 async def publish_artifact(
-    local_path: str, idempotency_key: str, ctx: Context, requires_review: bool = False
+    local_path: str,
+    idempotency_key: str,
+    ctx: Context,
+    requires_review: bool = False,
+    supersedes_id: s.ID | None = None,
+    expected_version: s.Version | None = None,
 ) -> dict:
-    """Explicitly upload a local file as an immutable project artifact (default maximum 64 MiB)."""
+    """Upload immutable bytes; supersedes_id + expected_version publish a linked new file version.
+
+    Previous content/approvals remain on their original artifact. Protected new bytes
+    require their own human approval. Source size limit defaults to 64 MiB.
+    """
     import anyio
 
     source = Path(local_path).expanduser()
+    if (supersedes_id is None) != (expected_version is None):
+        raise ToolError("A new file version needs both supersedes_id and expected_version")
 
     async def chunks():
         async with await anyio.open_file(source, "rb") as stream:
             while chunk := await stream.read(64 * 1024):
                 yield chunk
 
+    params = {"name": source.name, "requires_review": requires_review}
+    if supersedes_id:
+        params.update(supersedes_id=supersedes_id, expected_version=expected_version)
     return result(
         await client(ctx).post(
             "artifacts",
-            params={"name": source.name, "requires_review": requires_review},
+            params=params,
             content=chunks(),
             headers={
                 "Content-Type": "application/octet-stream",

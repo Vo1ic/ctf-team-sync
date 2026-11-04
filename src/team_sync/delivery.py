@@ -83,7 +83,7 @@ class Spool:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA foreign_keys=ON")
-        if self.db.execute("PRAGMA user_version").fetchone()[0] > 1:
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 2:
             self.db.close()
             raise DeliveryError("Delivery cache schema requires a newer adapter")
         self.db.executescript("""
@@ -110,7 +110,14 @@ class Spool:
                 PRIMARY KEY(consumer, message_id)
             );
         """)
-        self.db.execute("PRAGMA user_version=1")
+        with self.transaction():
+            columns = {row[1] for row in self.db.execute("PRAGMA table_info(pending_receipts)")}
+            if "message_version" not in columns:
+                self.db.execute(
+                    "ALTER TABLE pending_receipts ADD COLUMN message_version INTEGER "
+                    "NOT NULL DEFAULT 1"
+                )
+            self.db.execute("PRAGMA user_version=2")
         expected = json.dumps(settings.binding(), sort_keys=True)
         try:
             with self.transaction():
@@ -169,6 +176,21 @@ class Spool:
                     continue
                 if event["seq"] != cursor + 1:
                     raise DeliveryError("Event sequence has a gap; cursor was not advanced")
+                if event["type"] == "message.update":
+                    message_id = event["payload"]["resource_id"]
+                    self.db.execute(
+                        "UPDATE events SET context=NULL WHERE message_id=?", (message_id,)
+                    )
+                    for batch in self.db.execute(
+                        "SELECT id,payload FROM delivery_batches WHERE acked=0"
+                    ).fetchall():
+                        if any(
+                            item.get("message", {}).get("id") == message_id
+                            for item in json.loads(batch["payload"])["items"]
+                        ):
+                            self.db.execute(
+                                "DELETE FROM delivery_batches WHERE id=?", (batch["id"],)
+                            )
                 self.db.execute(
                     "INSERT INTO events(seq,id,envelope,context,message_id) VALUES (?,?,?,?,?)",
                     (
@@ -180,20 +202,42 @@ class Spool:
                     ),
                 )
                 cursor = event["seq"]
-            for message_id in receipts:
+            for message in receipts:
+                message_id = message["id"] if isinstance(message, dict) else message
+                version = message.get("version", 1) if isinstance(message, dict) else 1
                 key = f"received:{actor_id}:{message_id}"
+                if version > 1:
+                    key += f":v{version}"
                 self.db.execute(
-                    "INSERT OR IGNORE INTO pending_receipts VALUES (?,?)", (message_id, key)
+                    "INSERT INTO pending_receipts(message_id,command_key,message_version) "
+                    "VALUES (?,?,?) ON CONFLICT(message_id) DO UPDATE SET "
+                    "command_key=excluded.command_key,message_version=excluded.message_version "
+                    "WHERE excluded.message_version>pending_receipts.message_version",
+                    (message_id, key, version),
                 )
-            for message_id in processed:
-                self.db.execute("UPDATE events SET context=NULL WHERE message_id=?", (message_id,))
-                self.db.execute("DELETE FROM pending_receipts WHERE message_id=?", (message_id,))
+            processed_versions = {}
+            for entry in processed:
+                message_id = entry["id"] if isinstance(entry, dict) else entry
+                version = entry.get("version", 1) if isinstance(entry, dict) else 1
+                processed_versions[message_id] = max(version, processed_versions.get(message_id, 0))
+                for row in self.db.execute(
+                    "SELECT seq,context FROM events WHERE message_id=? AND context IS NOT NULL",
+                    (message_id,),
+                ).fetchall():
+                    if json.loads(row["context"])["message"].get("version", 1) <= version:
+                        self.db.execute("UPDATE events SET context=NULL WHERE seq=?", (row["seq"],))
+                self.db.execute(
+                    "DELETE FROM pending_receipts WHERE message_id=? AND message_version<=?",
+                    (message_id, version),
+                )
             if processed:
                 for batch in self.db.execute(
                     "SELECT id,payload FROM delivery_batches WHERE acked=0"
                 ).fetchall():
                     if any(
-                        item.get("message", {}).get("id") in processed
+                        item.get("message", {}).get("id") in processed_versions
+                        and item["message"].get("version", 1)
+                        <= processed_versions[item["message"]["id"]]
                         for item in json.loads(batch["payload"])["items"]
                     ):
                         self.db.execute("DELETE FROM delivery_batches WHERE id=?", (batch["id"],))
@@ -270,7 +314,10 @@ class Spool:
             datetime.now(UTC) - datetime.fromisoformat(snapshot["cached_at"])
         )
         for item in snapshot["items"]:
-            if item["id"] in seen or (
+            message_key = (
+                item["id"] if item.get("version", 1) == 1 else f"{item['id']}:v{item['version']}"
+            )
+            if message_key in seen or (
                 item.get("expires_at") and datetime.fromisoformat(item["expires_at"]) <= timestamp
             ):
                 continue
@@ -288,7 +335,7 @@ class Spool:
             if len(json.dumps(contexts + [context], ensure_ascii=False)) > max_chars:
                 break
             contexts.append(context)
-            ids.append(item["id"])
+            ids.append(message_key)
             if len(contexts) >= limit:
                 break
         row = self.db.execute(
@@ -422,6 +469,15 @@ CONTEXT_EVENTS = {
     "submission.create",
     "artifact.published",
     "challenge.create",
+    "project.update",
+    "actor.update",
+    "challenge.update",
+    "task.update",
+    "finding.update",
+    "flag.update",
+    "verification.update",
+    "submission.update",
+    "artifact.update",
 }
 
 
@@ -463,6 +519,9 @@ class Receiver:
 
     def flush_receipts(self):
         for receipt in self.spool.pending_receipts():
+            arguments = {"stage": "received"}
+            if receipt["message_version"] > 1:
+                arguments["expected_version"] = receipt["message_version"]
             try:
                 self.request(
                     "POST",
@@ -470,12 +529,16 @@ class Receiver:
                     json={
                         "operation": "message.ack",
                         "resource_id": receipt["message_id"],
-                        "arguments": {"stage": "received"},
+                        "arguments": arguments,
                         "idempotency_key": receipt["command_key"],
                     },
                 )
             except RemoteError as error:
-                if error.code != "receipt_regression":
+                if error.code not in {
+                    "receipt_regression",
+                    "version_conflict",
+                    "message_version_required",
+                }:
                     raise
             self.spool.receipt_done(receipt["message_id"])
 
@@ -507,8 +570,13 @@ class Receiver:
                 and event["actor_id"] == self.actor_id
                 and event["payload"].get("stage") == "processed"
             ):
-                processed.append(event["payload"]["resource_id"])
-            if event["type"] == "message.send":
+                processed.append(
+                    {
+                        "id": event["payload"]["resource_id"],
+                        "version": event["payload"].get("message_version", 1),
+                    }
+                )
+            if event["type"] in {"message.send", "message.update"}:
                 message_id = event["payload"]["resource_id"]
                 try:
                     message = self.request("GET", f"messages/{message_id}")
@@ -526,7 +594,7 @@ class Receiver:
                     "message": message,
                 }
                 if message["ack_stage"] is None:
-                    receipts.append(message_id)
+                    receipts.append({"id": message_id, "version": message.get("version", 1)})
             elif event["type"] in CONTEXT_EVENTS and event["actor_id"] != self.actor_id:
                 contexts[event["seq"]] = {"kind": "change", "event": event}
         if events:
@@ -540,7 +608,11 @@ class Receiver:
                 for item in attention["items"]
                 if not (item["sender_id"] == self.actor_id and item["recipient_id"] is None)
             ]
-            receipts.extend(item["id"] for item in attention["items"] if not item["ack_stage"])
+            receipts.extend(
+                {"id": item["id"], "version": item.get("version", 1)}
+                for item in attention["items"]
+                if not item["ack_stage"]
+            )
         self.spool.ingest(events, contexts, receipts, self.actor_id, processed, attention)
         self.flush_receipts()
         return len(events)
