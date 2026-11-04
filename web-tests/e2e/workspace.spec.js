@@ -140,7 +140,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   const config = JSON.parse(await readFile(await download.path(), "utf8"));
   expect(config.mcpServers["team-sync"].env.TEAM_SYNC_TOKEN).toBe(agentToken);
   expect(config.mcpServers["team-sync"].command).toBe("uvx");
-  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.4.0");
+  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.5.0");
   await page.getByLabel("Запуск MCP", { exact: true }).selectOption("local");
   await page
     .getByLabel("Репозиторій на пристрої агента")
@@ -1226,4 +1226,168 @@ test("edited private messages need a fresh recipient acknowledgement", async ({
   } finally {
     await context.close();
   }
+});
+
+test("edit work, challenge and participant directly from their lists", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const challenge = await command(request, ctf, "challenge.create", {
+    title: "Editable challenge",
+  });
+  const task = await command(request, ctf, "task.create", {
+    title: "Editable work",
+  });
+  await join(page, ctf);
+  await section(page, "Роботи");
+  await page
+    .locator(`.task-card[data-task-id="${task.id}"]`)
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page.getByLabel("Назва", { exact: true }).fill("Corrected work");
+  await page.getByLabel("Важливість", { exact: true }).selectOption("urgent");
+  await page.getByLabel("Дедлайн", { exact: true }).fill("2026-11-10T12:30");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  await expect(
+    page.locator(`.task-card[data-task-id="${task.id}"]`),
+  ).toContainText("Терміново");
+  await section(page, "Завдання CTF");
+  await page
+    .locator(`[data-challenge-id="${challenge.id}"]`)
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page.getByLabel("Бали", { exact: true }).fill("500");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  await expect(
+    page.locator(`[data-challenge-id="${challenge.id}"]`),
+  ).toContainText("500 балів");
+  await section(page, "Команда");
+  await page
+    .locator(`[data-actor-id="${agent.actor.id}"]`)
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page
+    .getByLabel("Нотатки", { exact: true })
+    .fill("Crypto specialist; ask about RSA");
+  await page.getByLabel("Роль", { exact: true }).selectOption("coordinator");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  const card = page.locator(`[data-actor-id="${agent.actor.id}"]`);
+  await expect(card).toContainText("Координатор");
+  await expect(card).toContainText("Crypto specialist");
+  await card
+    .getByRole("button", { name: agent.actor.name, exact: true })
+    .click();
+  await expect(page.locator("#modal")).toContainText("Crypto specialist");
+});
+
+test("journal receives logs live, filters severity, opens records and exports JSON", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const task = await command(request, ctf, "task.create", {
+    title: "Logged task",
+  });
+  await command(
+    request,
+    ctf,
+    "log.create",
+    { body: "Start analysis", task_id: task.id },
+    null,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Журнал");
+  await expect(page.locator(".journal-list")).toContainText("Start analysis");
+  await command(
+    request,
+    ctf,
+    "log.create",
+    { body: "Network retry warning", level: "warning", task_id: task.id },
+    null,
+    agent.token,
+  );
+  await expect(page.locator(".journal-list")).toContainText(
+    "Network retry warning",
+  );
+  await page.getByLabel("Рівень лога", { exact: true }).selectOption("warning");
+  await expect(page.locator(".journal-entry")).toHaveCount(1);
+  await page
+    .getByRole("button", { name: "Відкрити запис", exact: true })
+    .click();
+  await expect(page.locator("#modal")).toContainText("Network retry warning");
+  await page.getByRole("button", { name: "Закрити", exact: true }).click();
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Зберегти сторінку JSON", exact: true })
+    .click();
+  const download = await downloadPromise;
+  const exported = JSON.parse(await readFile(await download.path(), "utf8"));
+  expect(exported.items[0].log.body).toBe("Network retry warning");
+  await section(page, "Роботи");
+  await page
+    .locator(`.task-card[data-task-id="${task.id}"]`)
+    .getByRole("button", { name: "Журнал", exact: true })
+    .click();
+  await expect(page.locator(".journal-list")).toContainText("Start analysis");
+  await expect(page.locator(".journal-list")).toContainText(
+    "Network retry warning",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBeTruthy();
+});
+
+test("coordinator explicitly overrides an active assignment from the task editor", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const task = await command(request, ctf, "task.create", {
+    title: "Active handoff",
+  });
+  await command(
+    request,
+    ctf,
+    "task.claim",
+    { expected_version: task.version },
+    task.id,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Роботи");
+  await page
+    .locator(`.task-card[data-task-id="${task.id}"]`)
+    .getByRole("button", { name: "Редагувати", exact: true })
+    .click();
+  await page.getByLabel("Стан", { exact: true }).selectOption("open");
+  await page
+    .getByLabel("Звільнити активне призначення", { exact: false })
+    .check();
+  await page
+    .getByLabel("Коментар до правки (необов’язково)", { exact: true })
+    .fill("Agent went offline");
+  await page
+    .getByRole("button", { name: "Зберегти зміни", exact: true })
+    .click();
+  await expect(
+    page.locator(`.task-card[data-task-id="${task.id}"]`),
+  ).toContainText("Вільна");
+  await section(page, "Журнал");
+  await expect(page.locator(".journal-list")).toContainText(
+    "Координатор змінив активне призначення",
+  );
 });

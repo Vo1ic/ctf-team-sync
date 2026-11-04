@@ -89,6 +89,20 @@ def test_native_mcp_edit_is_visible_through_jsonl_history(client, project, live_
                 assert full["after"]["body"] == "Cross-runtime correction"
                 fields = rpc("resources/edit-contract", {"collection": "tasks"})
                 assert "title" in fields["changes"]["properties"]
+                log = await call(
+                    "write_log",
+                    {
+                        "body": "Heterogeneous MCP to JSONL log",
+                        "level": "warning",
+                        "idempotency_key": str(uuid4()),
+                    },
+                )
+                journal = rpc(
+                    "journal/read", {"level": "warning", "actor_id": agent["actor"]["id"]}
+                )
+                assert journal["items"][0]["log"]["id"] == log["id"]
+                mcp_journal = await call("get_journal", {"query": "Heterogeneous MCP to JSONL log"})
+                assert mcp_journal["items"][0]["log"]["body"] == log["body"]
 
     try:
         asyncio.run(scenario())

@@ -68,6 +68,7 @@ replace the authenticated actor. Unsupported versions fail before domain actions
 | `resources/get` | collection, resource_id, offset?, limit? | Full current resource and paginated related evidence |
 | `resources/edit-contract` | collection | Editable field schema; use resource.editing for your permissions |
 | `resources/history` | collection, resource_id, offset?, limit?, max_chars?, revision_id? | Bounded edit history, or one explicit full revision |
+| `journal/read` | before?, actor_id?, resource_id?, collection?, event_type?, level?, query?, include_routine?, limit?, max_chars? | Newest-first bounded action history and explicit shared logs |
 | `resources/search` | query, collection?, offset?, limit? | Search shared knowledge and your inbox |
 
 Context defaults to 12 items and a 6,000-character JSON items budget. A host can

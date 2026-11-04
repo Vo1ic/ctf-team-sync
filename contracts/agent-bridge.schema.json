@@ -30,6 +30,7 @@
         "operation": {
           "enum": [
             "resource.update",
+            "log.create",
             "challenge.create",
             "task.create",
             "task.claim",
@@ -184,7 +185,8 @@
             "submissions",
             "artifacts",
             "messages",
-            "activities"
+            "activities",
+            "logs"
           ],
           "title": "Collection",
           "type": "string"
@@ -211,7 +213,8 @@
             "submissions",
             "artifacts",
             "messages",
-            "activities"
+            "activities",
+            "logs"
           ],
           "title": "Collection",
           "type": "string"
@@ -280,7 +283,8 @@
             "submissions",
             "artifacts",
             "messages",
-            "activities"
+            "activities",
+            "logs"
           ],
           "title": "Collection",
           "type": "string"
@@ -349,6 +353,143 @@
         }
       },
       "title": "Inbox",
+      "type": "object"
+    },
+    "JournalQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Before"
+        },
+        "actor_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Id"
+        },
+        "resource_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Id"
+        },
+        "collection": {
+          "anyOf": [
+            {
+              "enum": [
+                "projects",
+                "actors",
+                "challenges",
+                "tasks",
+                "findings",
+                "flags",
+                "verifications",
+                "submissions",
+                "artifacts",
+                "messages",
+                "activities",
+                "logs"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collection"
+        },
+        "event_type": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Type"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "enum": [
+                "debug",
+                "info",
+                "warning",
+                "error"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Level"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Query"
+        },
+        "include_routine": {
+          "default": false,
+          "title": "Include Routine",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_chars": {
+          "default": 12000,
+          "maximum": 32000,
+          "minimum": 4000,
+          "title": "Max Chars",
+          "type": "integer"
+        }
+      },
+      "title": "JournalQuery",
       "type": "object"
     },
     "ListItems": {
@@ -444,7 +585,8 @@
                 "submissions",
                 "artifacts",
                 "messages",
-                "activities"
+                "activities",
+                "logs"
               ],
               "type": "string"
             },
@@ -745,6 +887,48 @@
         "params"
       ],
       "title": "events_syncRequest",
+      "type": "object"
+    },
+    "journal_readRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "journal/read",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/JournalQuery"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "journal_readRequest",
       "type": "object"
     },
     "messages_attentionRequest": {
@@ -1133,6 +1317,7 @@
       "context/ack": "#/$defs/context_ackRequest",
       "context/read": "#/$defs/context_readRequest",
       "events/sync": "#/$defs/events_syncRequest",
+      "journal/read": "#/$defs/journal_readRequest",
       "messages/attention": "#/$defs/messages_attentionRequest",
       "messages/inbox": "#/$defs/messages_inboxRequest",
       "messages/outbox": "#/$defs/messages_outboxRequest",
@@ -1172,6 +1357,9 @@
     },
     {
       "$ref": "#/$defs/messages_attentionRequest"
+    },
+    {
+      "$ref": "#/$defs/journal_readRequest"
     },
     {
       "$ref": "#/$defs/workspace_contextRequest"

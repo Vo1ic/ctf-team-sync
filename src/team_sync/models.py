@@ -75,6 +75,7 @@ class Actor(Scoped, Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     capabilities: Mapped[list] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    notes: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class Challenge(Scoped, Base):
@@ -84,6 +85,8 @@ class Challenge(Scoped, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     category: Mapped[str | None] = mapped_column(String(100))
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    points: Mapped[int | None] = mapped_column(Integer)
+    source_url: Mapped[str | None] = mapped_column(String(2048))
 
 
 class Task(Scoped, Base):
@@ -98,6 +101,7 @@ class Task(Scoped, Base):
         reference("approved_by_id", "actors"),
         CheckConstraint("status IN ('open','running','done')"),
         CheckConstraint("kind IN ('work','artifact_review')", name="task_kind"),
+        CheckConstraint("priority IN ('low','normal','urgent')", name="task_priority"),
         CheckConstraint(
             "approval_status IN ('not_required','pending','approved','declined')",
             name="task_approval",
@@ -121,6 +125,25 @@ class Task(Scoped, Base):
     approved_by_id: Mapped[str | None] = mapped_column(String(36))
     approval_note: Mapped[str | None] = mapped_column(Text)
     analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Log(Scoped, Base):
+    __tablename__ = "logs"
+    __table_args__ = scoped_constraints(
+        "logs",
+        reference("author_id", "actors"),
+        reference("task_id", "tasks"),
+        reference("challenge_id", "challenges"),
+        CheckConstraint("level IN ('debug','info','warning','error')", name="log_level"),
+    )
+    author_id: Mapped[str] = mapped_column(String(36))
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    challenge_id: Mapped[str | None] = mapped_column(String(36))
+    level: Mapped[str] = mapped_column(String(16), default="info")
+    body: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Finding(Scoped, Base):

@@ -2,6 +2,10 @@ import { el, button, field, openForm, modal, notify, date } from "./ui.js";
 
 const labels = {
   name: "Назва",
+  notes: "Нотатки",
+  points: "Бали",
+  source_url: "Посилання на платформі",
+  due_at: "Дедлайн",
   title: "Назва",
   description: "Опис",
   rules: "Правила та контекст",
@@ -70,6 +74,7 @@ const enumLabels = {
   manual: "Вручну",
   local_checker: "Локальний checker",
   platform: "Платформа",
+  low: "Низька",
   normal: "Звичайне",
   urgent: "Термінове",
   note: "Нотатка",
@@ -84,6 +89,7 @@ const enumLabels = {
   ready: "Готовий до наступного кроку",
 };
 const multiline = new Set([
+  "notes",
   "description",
   "rules",
   "result",
@@ -190,9 +196,9 @@ export async function editRecord(state, collection, resourceId, saved) {
         type: "number",
         min: property.minimum,
         max: property.maximum,
-        value: value ?? 120,
+        value: value ?? (key === "ttl_seconds" ? 120 : ""),
       });
-      conversions.set(key, (raw) => Number(raw));
+      conversions.set(key, (raw) => (raw === "" ? null : Number(raw)));
     } else if (property.format === "date-time") {
       const local = value
         ? new Date(
@@ -226,6 +232,17 @@ export async function editRecord(state, collection, resourceId, saved) {
     );
     return control;
   });
+  if (editing.can_override && item.status === "running")
+    fields.push(
+      field(
+        "force",
+        "Звільнити активне призначення для зміни стану або адресата",
+        {
+          type: "checkbox",
+          hint: "Потрібне пояснення. Старий агент втратить право завершити роботу на сервері. Новий адресат має сам прийняти її. Це не зупиняє процес на його пристрої.",
+        },
+      ),
+    );
   fields.push(
     field("edit_reason", "Коментар до правки (необов’язково)", {
       type: "textarea",
@@ -265,6 +282,7 @@ export async function editRecord(state, collection, resourceId, saved) {
           expected_version: item.version,
           changes,
           reason: values.edit_reason,
+          force: Boolean(values.force),
         },
         item.id,
       );

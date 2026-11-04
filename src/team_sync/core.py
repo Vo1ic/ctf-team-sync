@@ -14,6 +14,7 @@ from team_sync import schemas as s
 from team_sync.domain import DomainError as DomainError
 from team_sync.domain import digest, fail, record
 from team_sync.editing import EditingOperations, flag_subject, receipt_stage
+from team_sync.journal import JournalOperations
 from team_sync.settings import Settings
 from team_sync.workflows import WorkflowOperations, actor_records
 
@@ -21,7 +22,7 @@ WRITE_ROLES = {"owner", "coordinator", "worker"}
 LEAD_ROLES = {"owner", "coordinator"}
 
 
-class Core(WorkflowOperations, EditingOperations):
+class Core(WorkflowOperations, EditingOperations, JournalOperations):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -194,6 +195,7 @@ class Core(WorkflowOperations, EditingOperations):
             "submissions": m.Submission,
             "artifacts": m.Artifact,
             "activities": m.Activity,
+            "logs": m.Log,
         }
         with self.context(project_id, token) as (db, _, __):
             return self.rows(db, models[collection], project_id, offset, limit)
@@ -260,6 +262,7 @@ class Core(WorkflowOperations, EditingOperations):
     def execute(self, project_id, token, operation, arguments, resource_id, key):
         handlers: dict[str, tuple[type[s.Input], Callable, set]] = {
             "resource.update": (s.ResourceEdit, self.edit_resource, WRITE_ROLES | {"observer"}),
+            "log.create": (s.LogCreate, self.create_log, WRITE_ROLES),
             "challenge.create": (s.ChallengeCreate, self.create_challenge, WRITE_ROLES),
             "task.create": (s.TaskCreate, self.create_task, WRITE_ROLES),
             "task.claim": (s.Lease, self.claim, WRITE_ROLES),
@@ -286,7 +289,15 @@ class Core(WorkflowOperations, EditingOperations):
         fingerprint_data = data.model_dump(mode="json")
         # Preserve command hashes for in-flight v0.2 calls when new fields use defaults.
         defaults = {
-            "task.create": {"requested_assignee_id": None},
+            "task.create": {
+                "requested_assignee_id": None,
+                "priority": "normal",
+                "due_at": None,
+                "points": None,
+                "source_url": None,
+            },
+            "challenge.create": {"points": None, "source_url": None},
+            "resource.update": {"force": False},
             "finding.create": {"artifact_id": None},
             "message.ack": {"expected_version": None},
             "message.send": {
@@ -322,6 +333,7 @@ class Core(WorkflowOperations, EditingOperations):
                 "kind",
                 "approval_status",
                 "message_version",
+                "level",
             ):
                 if field in response:
                     payload[field] = response[field]
@@ -363,7 +375,11 @@ class Core(WorkflowOperations, EditingOperations):
         if target and (not target.active or target.role == "observer"):
             fail(409, "inactive_recipient", "Select an active participant with permission to work")
         task = self.insert(
-            db, project, m.Task, created_by_id=actor.id, **data.model_dump(exclude={"category"})
+            db,
+            project,
+            m.Task,
+            created_by_id=actor.id,
+            **data.model_dump(exclude={"category", "points", "source_url"}),
         )
         if target and target.id != actor.id:
             self._notice(

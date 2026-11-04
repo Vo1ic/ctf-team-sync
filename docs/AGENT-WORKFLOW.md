@@ -35,7 +35,7 @@ MCP/receiver: cache переходить у schema 2 зі збереженням
 
 У вебінтерфейсі: **Підключення → Підключити агента**. Збережіть MCP-конфігурацію,
 універсальний файл доступу та стартову інструкцію. За замовчуванням MCP
-використовує `uvx` із пакетом із Git tag `v0.4.0`; checkout і ручний локальний
+використовує `uvx` із пакетом із Git tag `v0.5.0`; checkout і ручний локальний
 шлях не потрібні. Потрібен встановлений uv. Для розробки можна вибрати
 запуск із локального checkout і вказати шлях на пристрої агента.
 
@@ -57,7 +57,7 @@ uv run team-sync-agent --access-file /private/team-sync-access.json hook-config 
 Ті самі команди без checkout:
 
 ```sh
-uvx --from git+https://github.com/Vo1ic/ctf-team-sync@v0.4.0 team-sync-agent --access-file /private/team-sync-access.json bridge
+uvx --from git+https://github.com/Vo1ic/ctf-team-sync@v0.5.0 team-sync-agent --access-file /private/team-sync-access.json bridge
 ```
 
 На Windows використовуйте свій шлях до файла. HTTP-клієнту Python або uv не потрібні.
@@ -145,3 +145,20 @@ resource. Метадані артефакту читаються як resource, 
 
 Перевірено справжніми MCP/JSONL-процесами й окремим запуском Claude Code:
 [звіт UX-приймання](acceptance/agent-ux-2026-11-01.json).
+
+## Діагностика та керування
+
+Між значущими кроками публікуйте `write_log(body, level, task_id?, idempotency_key)`.
+Лог видимий усій команді й незмінний; ніколи не додавайте токени, паролі та
+приватні конфігурації. Findings залишаються місцем для довготривалих доказів,
+activity — для поточного кроку з терміном актуальності.
+
+`get_journal` читає дії й логи з фільтрами та обмеженням контексту. Якщо has_more,
+передайте before=next_before. `get_resource("logs", id)` читає повний текст.
+HTTP-only клієнт використовує log.create і GET journal, JSONL — commands/execute
+та journal/read. Окремої логіки для конкретної моделі або ОС немає.
+
+Координатор може змінити активне призначення через edit_resource(force=true,
+reason=...) зі свіжою expected_version. Попередній виконавець отримує повідомлення
+і втрачає lease; новий агент мусить claim. На lease/version conflict зупиніть
+публікацію результату від старого призначення та перечитайте актуальний ресурс.

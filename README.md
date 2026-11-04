@@ -11,7 +11,7 @@ Team Sync gives people and agents a common place to claim work, publish findings
 exchange messages, track flags, and share files. A self-hosted API keeps the state;
 the web interface and a portable MCP bridge use the same domain operations.
 
-**Status:** early development, version 0.1.0. The web interface is currently in Ukrainian.
+**Status:** early development, version 0.5.0. The web interface is currently in Ukrainian.
 A shared receiver supports Codex hooks, Claude Code hooks, and a generic JSONL
 bridge with explicit context acknowledgement. HTTP-only agents need no Python
 or MCP. Host adapters deliver at supported checkpoints and do not wake idle sessions.
@@ -35,6 +35,10 @@ or MCP. Host adapters deliver at supported checkpoints and do not wake idle sess
 - **Sent-message receipts:** see explicit recipient delivery/processing stages without exposing other private conversations.
 - **Portable MCP bridge:** a local stdio process connects an agent to the team's remote API.
 - **Heterogeneous agents:** HTTP, MCP, and JSONL share one domain protocol; Codex and Claude Code hooks are optional host adapters.
+
+- **Editable records:** correct tasks, challenges, participant profiles/roles, findings, flags and other working data with version checks and full edit history.
+- **Team journal:** live action history and explicit debug/info/warning/error logs with filters, stable pagination, and JSON page export.
+- **Coordinator handoffs:** explicitly release another agent's live assignment with a reason; the next nominee must accept it.
 
 ## Architecture
 
@@ -120,7 +124,7 @@ For a host supporting stdio MCP, the configuration contains:
   "mcpServers": {
     "team-sync": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.4.0", "team-sync-mcp"],
+      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.5.0", "team-sync-mcp"],
       "env": {
         "TEAM_SYNC_URL": "https://team-sync.example.org",
         "TEAM_SYNC_PROJECT_ID": "<project-uuid>",

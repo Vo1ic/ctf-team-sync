@@ -4,7 +4,7 @@ import json
 import math
 from typing import get_args
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 
 from team_sync import models as m
 from team_sync.core import record
@@ -24,6 +24,7 @@ MODELS = {
     "artifacts": m.Artifact,
     "messages": m.Message,
     "activities": m.Activity,
+    "logs": m.Log,
 }
 
 
@@ -74,12 +75,15 @@ def brief(item, timestamp=None):
         "rules",
         "approval_note",
         "archive_reason",
+        "notes",
     ):
         if isinstance(value.get(field), str):
             value[field] = clip(value[field])
     value.pop("verification", None)
     if "capabilities" in value and isinstance(value["capabilities"], list):
         value["capabilities"] = [clip(c, 60) for c in value["capabilities"][:12]]
+    if value.get("notes") == "":
+        value.pop("notes", None)
     if isinstance(item, m.Task) and timestamp:
         remaining = (
             max(0, math.ceil((item.lease_until - timestamp).total_seconds()))
@@ -214,7 +218,12 @@ def workspace(core, db, project, actor, query):
                     m.Task.requested_assignee_id.is_(None), m.Task.requested_assignee_id == actor.id
                 ),
             )
-            .order_by(m.Task.created_at, m.Task.id)
+            .order_by(
+                case((m.Task.priority == "urgent", 0), (m.Task.priority == "normal", 1), else_=2),
+                m.Task.due_at.asc().nulls_last(),
+                m.Task.created_at,
+                m.Task.id,
+            )
         ),
         "team_tasks": section(
             scoped(m.Task)

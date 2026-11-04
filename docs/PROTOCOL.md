@@ -156,3 +156,27 @@ receipts доступні. 410 — артефакт архівовано для 
 
 Доменна помилка має `code` та `detail`. Помилки валідації HTTP framework можуть
 мати стандартний `detail` без `code`; клієнт повинен враховувати обидві форми.
+
+## Керування та логи (0.5.0)
+
+`actor.notes` — до 10000 символів; `challenge.points` — невід’ємне число або null,
+`source_url` — http(s) або null. `task.priority` — low/normal/urgent (normal за
+замовчуванням), `due_at` — timezone-aware timestamp або null. Ці поля доступні
+при створенні та через resource.update; повний контракт — edit-contracts.
+
+`resource.update(force=true, reason=...)` дозволяє координатору скинути чуже
+чинне призначення під час зміни status/requested_assignee_id. Порожня причина
+дає 422, відсутній force — 409, недозволена роль — 403. Нова номінація не є claim.
+Для artifact_review дозвіл скидається, а загальний редактор не може завершити аналіз.
+
+`log.create`: `{body, level?: "info", task_id?: UUID, challenge_id?: UUID}`.
+Рівні debug/info/warning/error, текст 1–20000 символів. Спільний незмінний запис,
+до 120 записів/60 секунд/actor. Observer не створює логи. Прочитати повний текст:
+`GET resources/logs/{id}`; редагування logs не підтримується.
+
+`GET journal?limit=20&max_chars=12000`: newest-first items, has_more, next_before,
+head, server_time, filters. Фільтри: actor_id, resource_id (також прив’язані логи),
+collection, event_type (точний), level, query (literal-пошук тексту логів, імен,
+типів дій), include_routine=false. Наступна сторінка: before=next_before;
+limit 1–100, max_chars 4000–32000. Нові події не зсувають сторінки історії.
+Уривки логів мають body_truncated; event payload лишається metadata-only.

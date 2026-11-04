@@ -30,6 +30,7 @@ Collection = Literal[
     "submissions",
     "artifacts",
     "activities",
+    "logs",
 ]
 
 
@@ -70,7 +71,7 @@ def create_app(settings: Settings | None = None):
         yield
         core.engine.dispose()
 
-    app = FastAPI(title="CTF Team Sync", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="CTF Team Sync", version="0.5.0", lifespan=lifespan)
     app.state.core = core
 
     @app.middleware("http")
@@ -221,6 +222,10 @@ def create_app(settings: Settings | None = None):
     ):
         return {"items": core.inbox(project_id, token, offset, limit)}
 
+    @app.get("/api/v1/projects/{project_id}/journal")
+    def journal(project_id: s.ID, token: Token, query: Annotated[s.JournalQuery, Query()]):
+        return core.journal(project_id, token, query)
+
     @app.get("/api/v1/projects/{project_id}/resources/{collection}/{resource_id}/history")
     def history(
         project_id: s.ID,
@@ -237,7 +242,7 @@ def create_app(settings: Settings | None = None):
         )
 
     @app.get("/api/v1/projects/{project_id}/edit-contracts")
-    def edit_contract(project_id: s.ID, token: Token, collection: s.ResourceCollection):
+    def edit_contract(project_id: s.ID, token: Token, collection: s.EditableCollection):
         from team_sync.editing import FIELDS
 
         with core.context(project_id, token):

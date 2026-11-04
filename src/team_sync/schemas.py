@@ -16,7 +16,7 @@ LeaseSeconds = Annotated[int, Field(ge=10, le=3600)]
 ContextLimit = Annotated[int, Field(ge=1, le=20)]
 ContextBudget = Annotated[int, Field(ge=4000, le=32000)]
 
-ResourceCollection = Literal[
+EditableCollection = Literal[
     "projects",
     "actors",
     "challenges",
@@ -29,6 +29,7 @@ ResourceCollection = Literal[
     "messages",
     "activities",
 ]
+ResourceCollection = Literal[EditableCollection, "logs"]
 
 
 class Input(BaseModel):
@@ -56,18 +57,25 @@ class ActorCreate(Input):
     role: Role = Role.worker
     owner_id: ID | None = None
     capabilities: list[Title] = Field(default_factory=list, max_length=100)
+    notes: str = Field(default="", max_length=10000)
 
 
 class ChallengeCreate(Input):
     title: Title
     description: str = Field(default="", max_length=100_000)
     category: Annotated[str, Field(max_length=100)] | None = None
+    points: Annotated[int, Field(ge=0)] | None = None
+    source_url: Annotated[str, Field(max_length=2048, pattern=r"^https?://\S+$")] | None = None
 
 
 class TaskCreate(ChallengeCreate):
     category: None = None
     challenge_id: ID | None = None
     requested_assignee_id: ID | None = None
+    points: None = None
+    source_url: None = None
+    priority: Literal["low", "normal", "urgent"] = "normal"
+    due_at: AwareDatetime | None = None
 
 
 class Assign(Input):
@@ -192,6 +200,7 @@ class AgentAction(Input):
 
     operation: Literal[
         "resource.update",
+        "log.create",
         "challenge.create",
         "task.create",
         "task.claim",
@@ -265,10 +274,11 @@ class AttentionQuery(Input):
 
 
 class ResourceEdit(Input):
-    collection: ResourceCollection
+    collection: EditableCollection
     expected_version: Version
     changes: dict = Field(min_length=1, max_length=20)
     reason: str = Field(default="", max_length=10000)
+    force: bool = False
 
 
 class ProjectFields(Input):
@@ -284,12 +294,15 @@ class ActorFields(Input):
     capabilities: Annotated[list[Title], Field(max_length=100)] = None
     owner_id: ID | None = None
     active: bool = None
+    notes: Annotated[str, Field(max_length=10000)] = None
 
 
 class ChallengeFields(Input):
     title: Title = None
     description: Annotated[str, Field(max_length=100000)] = None
     category: Annotated[str, Field(max_length=100)] | None = None
+    points: Annotated[int, Field(ge=0)] | None = None
+    source_url: Annotated[str, Field(max_length=2048, pattern=r"^https?://\S+$")] | None = None
 
 
 class TaskFields(Input):
@@ -299,6 +312,28 @@ class TaskFields(Input):
     requested_assignee_id: ID | None = None
     status: Literal["open", "done"] = None
     result: Annotated[str, Field(max_length=100000)] | None = None
+    priority: Literal["low", "normal", "urgent"] = None
+    due_at: AwareDatetime | None = None
+
+
+class LogCreate(Input):
+    level: Literal["debug", "info", "warning", "error"] = "info"
+    body: Annotated[str, Field(min_length=1, max_length=20000, pattern=r"\S")]
+    task_id: ID | None = None
+    challenge_id: ID | None = None
+
+
+class JournalQuery(Input):
+    before: int | None = Field(default=None, ge=1)
+    actor_id: ID | None = None
+    resource_id: ID | None = None
+    collection: ResourceCollection | None = None
+    event_type: str | None = Field(default=None, min_length=1, max_length=100)
+    level: Literal["debug", "info", "warning", "error"] | None = None
+    query: str | None = Field(default=None, min_length=1, max_length=200)
+    include_routine: bool = False
+    limit: int = Field(default=20, ge=1, le=100)
+    max_chars: ContextBudget = 12000
 
 
 class FindingFields(Input):

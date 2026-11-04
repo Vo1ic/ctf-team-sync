@@ -36,6 +36,11 @@
         "maxLength": 10000,
         "title": "Reason",
         "type": "string"
+      },
+      "force": {
+        "default": false,
+        "title": "Force",
+        "type": "boolean"
       }
     },
     "required": [
@@ -44,6 +49,60 @@
       "changes"
     ],
     "title": "ResourceEdit",
+    "type": "object"
+  },
+  "log.create": {
+    "additionalProperties": false,
+    "properties": {
+      "level": {
+        "default": "info",
+        "enum": [
+          "debug",
+          "info",
+          "warning",
+          "error"
+        ],
+        "title": "Level",
+        "type": "string"
+      },
+      "body": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Body",
+        "type": "string"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      }
+    },
+    "required": [
+      "body"
+    ],
+    "title": "LogCreate",
     "type": "object"
   },
   "challenge.create": {
@@ -74,6 +133,33 @@
         ],
         "default": null,
         "title": "Category"
+      },
+      "points": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Points"
+      },
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 2048,
+            "pattern": "^https?://\\S+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Url"
       }
     },
     "required": [
@@ -103,6 +189,16 @@
         "title": "Category",
         "type": "null"
       },
+      "points": {
+        "default": null,
+        "title": "Points",
+        "type": "null"
+      },
+      "source_url": {
+        "default": null,
+        "title": "Source Url",
+        "type": "null"
+      },
       "challenge_id": {
         "anyOf": [
           {
@@ -128,6 +224,29 @@
         ],
         "default": null,
         "title": "Requested Assignee Id"
+      },
+      "priority": {
+        "default": "normal",
+        "enum": [
+          "low",
+          "normal",
+          "urgent"
+        ],
+        "title": "Priority",
+        "type": "string"
+      },
+      "due_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Due At"
       }
     },
     "required": [

@@ -22,6 +22,7 @@ MODELS = {
         ("messages", m.Message),
         ("artifacts", m.Artifact),
         ("activities", m.Activity),
+        ("logs", m.Log),
     ]
 }
 FIELDS = {
@@ -62,6 +63,8 @@ def receipt_stage(receipt, message):
 
 class EditingOperations:
     def editing_info(self, actor, item, collection):
+        if collection not in FIELDS:
+            return {"allowed": False, "fields": [], "expected_version": item.version}
         allowed = []
         for field in FIELDS[collection].model_fields:
             try:
@@ -73,13 +76,22 @@ class EditingOperations:
             if collection == "actors" and field == "owner_id" and item.kind != "agent":
                 continue
             if collection == "tasks":
-                if item.kind == "artifact_review" and field == "status":
+                if (
+                    item.kind == "artifact_review"
+                    and field == "status"
+                    and actor.role not in {"owner", "coordinator"}
+                ):
                     continue
                 if field == "requested_assignee_id" and actor.role not in {"owner", "coordinator"}:
                     if item.created_by_id != actor.id:
                         continue
             allowed.append(field)
-        return {"allowed": bool(allowed), "fields": allowed, "expected_version": item.version}
+        return {
+            "allowed": bool(allowed),
+            "fields": allowed,
+            "expected_version": item.version,
+            "can_override": collection == "tasks" and actor.role in {"owner", "coordinator"},
+        }
 
     def editable(self, db, project, actor, collection, resource_id):
         if collection == "projects":
@@ -95,7 +107,7 @@ class EditingOperations:
             allowed = actor.id == item.sender_id and actor.role != "observer"
         elif collection == "actors":
             allowed = actor.role == "owner" or (
-                actor.id == item.id and set(changes) <= {"name", "capabilities"}
+                actor.id == item.id and set(changes) <= {"name", "capabilities", "notes"}
             )
         elif collection == "activities":
             allowed = actor.id == item.actor_id
@@ -137,6 +149,8 @@ class EditingOperations:
 
     def edit_resource(self, db, project, actor, data, resource_id):
         collection = data.collection
+        if data.force and (collection != "tasks" or actor.role not in {"owner", "coordinator"}):
+            fail(403, "override_forbidden", "Only a coordinator can override a task assignment")
         item = self.editable(db, project, actor, collection, resource_id)
         self.edit_permission(actor, item, collection, data.changes)
         self.check_version(item, data.expected_version)
@@ -152,7 +166,7 @@ class EditingOperations:
         if collection == "actors":
             self._edit_actor(db, project, actor, item, changes)
         elif collection == "tasks":
-            self._edit_task(db, project, actor, item, changes, data.reason)
+            self._edit_task(db, project, actor, item, changes, data.reason, data.force)
         elif collection == "findings":
             values = {**record(item), **changes}
             for field, model in [
@@ -253,7 +267,57 @@ class EditingOperations:
         if "name" in changes:
             changes["name"] = self.unique_name(db, project.id, changes["name"], item.kind, item.id)
 
-    def _edit_task(self, db, project, actor, item, changes, reason):
+    def _edit_task(self, db, project, actor, item, changes, reason, force=False):
+        controls = set(changes) & {"status", "requested_assignee_id"}
+        timestamp = db.scalar(select(func.clock_timestamp()))
+        live = item.status == "running" and item.lease_until and item.lease_until > timestamp
+        if (
+            controls
+            and live
+            and (item.assignee_id != actor.id or "requested_assignee_id" in changes)
+        ):
+            if not force:
+                fail(
+                    409,
+                    "task_in_progress",
+                    "A live assignment needs an explicit coordinator override",
+                )
+            if not reason.strip():
+                fail(
+                    422,
+                    "override_reason_required",
+                    "Explain why the active assignment is being changed",
+                )
+            old = self.get(db, m.Actor, project.id, item.assignee_id)
+            item.status, item.assignee_id, item.lease_until = "open", None, None
+            if item.kind == "artifact_review":
+                item.approval_status, item.approved_by_id, item.analysis_started_at = (
+                    "pending",
+                    None,
+                    None,
+                )
+                item.approval_note = None
+            self._activity(
+                db, project, actor, old, "ready", f"Координатор змінив роботу: {item.title}"
+            )
+            if old.id != actor.id and old.active:
+                self._notice(
+                    db,
+                    project,
+                    actor,
+                    old.id,
+                    f"{actor.name} змінив призначення «{item.title}». {reason}",
+                    item,
+                    "status",
+                    control=True,
+                )
+            self.emit(
+                db,
+                project,
+                actor,
+                "task.override",
+                {"resource_id": item.id, "previous_assignee_id": old.id, "resource_type": "tasks"},
+            )
         if changes.get("status", item.status) == "done" and not changes.get("result", item.result):
             fail(422, "result_required", "A completed task requires a result")
         if "challenge_id" in changes:
@@ -294,7 +358,7 @@ class EditingOperations:
                 item.id,
             )
         if "status" in changes:
-            if item.kind == "artifact_review":
+            if item.kind == "artifact_review" and changes["status"] != "open":
                 fail(
                     409,
                     "review_workflow_required",
@@ -314,6 +378,13 @@ class EditingOperations:
             if changes["status"] == "open":
                 item.assignee_id = None
                 item.result = None
+                if item.kind == "artifact_review":
+                    item.approval_status, item.approved_by_id, item.analysis_started_at = (
+                        "pending",
+                        None,
+                        None,
+                    )
+                    item.approval_note = None
 
     def _edit_flag(self, db, project, item, changes):
         if changes.get("challenge_id"):

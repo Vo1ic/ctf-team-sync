@@ -39,7 +39,9 @@ mcp = FastMCP(
         "Reuse idempotency_key when retrying the same command. "
         "Use update_task(release, reason) to hand off unfinished work with preserved context. "
         "Use get_attention between steps; status groups and expiry reduce inbox noise. "
-        "Report activity honestly. Protected artifacts require request_artifact_review, "
+        "Use write_log for shared progress/diagnostics and get_journal for filtered history. "
+        "Logs are immutable; never include credentials. Report activity honestly. "
+        "Protected artifacts require request_artifact_review, "
         "a HUMAN decision, then update_artifact_review(start) before fetch_artifact. "
         "For corrections, get_resource and get_edit_contract, then edit_resource with the "
         "current version; get_edit_history preserves provenance. Edited messages require "
@@ -169,6 +171,65 @@ async def get_attention(
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=True))
+async def write_log(
+    body: str,
+    idempotency_key: s.CommandKey,
+    ctx: Context,
+    level: Literal["debug", "info", "warning", "error"] = "info",
+    task_id: s.ID | None = None,
+    challenge_id: s.ID | None = None,
+) -> dict:
+    """Append a shared progress/diagnostic log. Never include credentials or environment dumps.
+
+    Logs are immutable. Publish a new correction if needed. No terminal output is captured.
+    """
+    return await command(
+        s.AgentAction(
+            operation="log.create",
+            arguments=s.LogCreate(
+                body=body, level=level, task_id=task_id, challenge_id=challenge_id
+            ).model_dump(),
+            idempotency_key=idempotency_key,
+        ),
+        ctx,
+    )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def get_journal(
+    ctx: Context,
+    before: int | None = None,
+    actor_id: s.ID | None = None,
+    resource_id: s.ID | None = None,
+    collection: s.ResourceCollection | None = None,
+    event_type: str | None = None,
+    level: Literal["debug", "info", "warning", "error"] | None = None,
+    query: str | None = None,
+    include_routine: bool = False,
+    limit: int = 20,
+    max_chars: s.ContextBudget = 12000,
+) -> dict:
+    """Read newest-first action history and explicit logs; follow next_before if has_more.
+
+    Filter by actor, record, collection, event, severity or log text/actor name.
+    Routine renewals/receipts are hidden by default. Private message bodies stay private.
+    """
+    params = s.JournalQuery(
+        before=before,
+        actor_id=actor_id,
+        resource_id=resource_id,
+        collection=collection,
+        event_type=event_type,
+        level=level,
+        query=query,
+        include_routine=include_routine,
+        limit=limit,
+        max_chars=max_chars,
+    )
+    return result(await client(ctx).get("journal", params=params.model_dump(exclude_none=True)))
+
+
+@mcp.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=True))
 async def assign_task(
     task_id: s.ID,
     expected_version: s.Version,
@@ -267,31 +328,38 @@ async def update_artifact_review(
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_edit_contract(collection: s.ResourceCollection, ctx: Context) -> dict:
+async def get_edit_contract(collection: s.EditableCollection, ctx: Context) -> dict:
     """Read editable fields/types before an edit. get_resource reports your allowed fields."""
     return result(await client(ctx).get("edit-contracts", params={"collection": collection}))
 
 
 @mcp.tool(annotations=ToolAnnotations(destructiveHint=False, idempotentHint=True))
 async def edit_resource(
-    collection: s.ResourceCollection,
+    collection: s.EditableCollection,
     resource_id: s.ID,
     expected_version: s.Version,
     changes: dict,
     idempotency_key: s.CommandKey,
     ctx: Context,
     reason: str = "",
+    force: bool = False,
 ) -> dict:
     """Edit current content with optimistic version checks and immutable before/after history.
 
     Get current version/allowed fields with get_resource; inspect get_edit_contract.
     Preserve provenance, roles, task leases and human approval. New file bytes use
     publish_artifact(supersedes_id, expected_version), not this metadata editor.
+    A coordinator may override a live task with force=True and a reason; the new
+    nominee must still claim. This cannot stop a process on another device.
     Message edits need new version-specific acknowledgements; flag value/scope edits
     reset confirmation. Reuse the exact key/arguments after an uncertain response.
     """
     args = s.ResourceEdit(
-        collection=collection, expected_version=expected_version, changes=changes, reason=reason
+        collection=collection,
+        expected_version=expected_version,
+        changes=changes,
+        reason=reason,
+        force=force,
     )
     return await command(
         s.AgentAction(

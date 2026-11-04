@@ -8,6 +8,7 @@ from team_sync.bridge_protocol import DeliveryBatch, request_schema
 def operation_schemas():
     models = {
         "resource.update": s.ResourceEdit,
+        "log.create": s.LogCreate,
         "challenge.create": s.ChallengeCreate,
         "task.create": s.TaskCreate,
         "task.claim": s.Lease,
