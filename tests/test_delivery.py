@@ -4,6 +4,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 from threading import Barrier
 from types import SimpleNamespace
@@ -128,6 +129,8 @@ def test_unknown_event_version_does_not_advance_cursor(settings):
     item = {**event(settings, 1), "schema_version": 2}
 
     def respond(request):
+        if request.url.path.endswith("attention"):
+            return httpx.Response(404)
         if request.url.path.endswith("snapshot"):
             return httpx.Response(
                 200, json={"project": {"id": settings.project_id}, "actor": {"id": actor_id}}
@@ -156,6 +159,8 @@ def test_lost_receipt_response_retries_same_key_after_restart(settings):
     keys = []
 
     def respond(request):
+        if request.url.path.endswith("attention"):
+            return httpx.Response(404)
         if request.url.path.endswith("snapshot"):
             return httpx.Response(
                 200, json={"project": {"id": settings.project_id}, "actor": {"id": actor_id}}
@@ -320,6 +325,55 @@ def test_config_generation_contains_no_credentials(tmp_path):
         assert "commandWindows" in handler
         assert handler["timeout"] == 5
         assert str(state_path) in handler["command"]
+
+
+def test_hook_attention_bypasses_fifo_backlog_without_changing_jsonl_packets(settings):
+    spool = Spool(settings)
+    author, actor, urgent = str(uuid4()), str(uuid4()), str(uuid4())
+    events = [event(settings, index) for index in range(1, 40)]
+    contexts = {item["seq"]: {"kind": "change", "event": item} for item in events}
+    spool.ingest(events, contexts, [], actor)
+    packet = spool.read_context("generic")
+    message = {
+        "id": urgent,
+        "body": "A human decision is required",
+        "priority": "urgent",
+        "sender_id": author,
+        "recipient_id": actor,
+        "expires_at": None,
+    }
+    spool.ingest(
+        [],
+        {},
+        [],
+        actor,
+        attention={"items": [message], "server_time": datetime.now(UTC).isoformat()},
+    )
+    # The generic protocol's explicit acknowledgement remains stable and ordered.
+    assert spool.read_context("generic") == packet
+    items, cursor, ids = spool.hook_batch("claude:session")
+    assert items[0]["message"]["id"] == urgent and ids == [urgent]
+    assert len(json.dumps(items, ensure_ascii=False)) <= 6000
+    spool.hook_emitted("claude:session", cursor, ids)
+    spool.close()
+    spool = Spool(settings)
+    assert not any(item.get("message") for item in spool.hook_batch("claude:session")[0])
+    spool.replay("claude:session")
+    assert spool.hook_batch("claude:session")[2] == [urgent]
+    spool.ingest(
+        [],
+        {},
+        [],
+        actor,
+        attention={
+            "items": [
+                {**message, "expires_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()}
+            ],
+            "server_time": datetime.now(UTC).isoformat(),
+        },
+    )
+    assert spool.hook_batch("new-session")[2] == []
+    spool.close()
 
 
 def test_hook_failure_is_nonblocking_and_does_not_echo_input():

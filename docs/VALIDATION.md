@@ -106,3 +106,26 @@ progress/release/message/ack. Parent Codex через HTTP одразу взяв
 моделі без legacy bootstrap або повного каталогу схем. Завдання свідомо не позначали
 завершеним: очікуваний людський review залишався невиконаним.
 [Санітизований звіт](acceptance/agent-ux-2026-11-01.json).
+
+## Людина, артефакти й увага, 0.3
+
+Локально: 63 Python-тести на PostgreSQL 17, 9 Node-тестів, 20 Playwright-тестів.
+Перевірено заборону байтів до рішення й explicit start, agent-owner без права
+human approval/видачі human identity, передачу роботи з новим дозволом, README
+із provenance, причину архівування та відновлення, прострочений lease, номінацію
+людині без автоматичного claim, унікальні імена, TTL activity, точні дублікати,
+ідемпотентний replay, status grouping, privacy, expiry, priority/fairness, ліміти
+120/20 sends і reply chain. Attention має бюджет навіть для великих тіл; повний
+ресурс зберігає весь текст і не підтверджується читанням.
+
+Окремий MCP subprocess проходить review → рішення тестової людини через HTTP
+→ start/download/report; JSONL бачить approval через messages/attention. Hook
+отримує рішення перед історичною чергою, зберігає emission після перезапуску,
+не змінюючи стабільний generic delivery packet. Старий сервер має FIFO fallback.
+
+Реальний локальний demo після міграції перевірено в Chromium desktop/mobile;
+старі матеріали збережені. Нові матеріали, фото, plain text, explicit approval,
+README-download та archive/restore проходять браузерні тести. Два справжні
+Claude Code процеси підтвердили gated bytes та аналіз випадкового маркера:
+див. [живе приймання](LIVE-ACCEPTANCE.md). Human approval у цьому прогоні —
+симуляція тестового стенда, не дія реальної людини.

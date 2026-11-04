@@ -1682,3 +1682,49 @@
     margin-bottom: 8px;
   }
 }
+/* Artifact reviews remain readable on narrow screens and with long model output. */
+.artifact-toolbar {
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.artifact-info .badge {
+  margin-top: 8px;
+  white-space: normal;
+}
+.artifact-card.archived {
+  opacity: 0.75;
+}
+.review-card {
+  padding: 18px;
+  border: 1px solid var(--border, #dce1e8);
+  border-radius: 12px;
+  margin-top: 16px;
+}
+.review-card pre,
+.artifact-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 440px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.artifact-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+  margin-top: 16px;
+}
+.activity-note {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border, #dce1e8);
+}
+.activity-note p {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.activity-note.stale {
+  opacity: 0.7;
+}

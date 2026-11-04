@@ -63,6 +63,7 @@ replace the authenticated actor. Unsupported versions fail before domain actions
 | `collections/list` | collection, offset?, limit? | Read a paginated collection |
 | `messages/inbox` | offset?, limit? | Read messages without changing processing state |
 | `messages/outbox` | offset?, limit? | Read your own sent messages and recipient receipts |
+| `messages/attention` | offset?, limit?, max_chars? | Bounded pending messages in priority/sender order; status grouping and expiry |
 | `workspace/context` | task_id?, challenge_id?, limit?, max_chars? | Bounded current working state, separate from durable delivery packets |
 | `resources/get` | collection, resource_id, offset?, limit? | Full current resource and paginated related evidence |
 | `resources/search` | query, collection?, offset?, limit? | Search shared knowledge and your inbox |

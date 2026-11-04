@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CTF Team Sync",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/health": {
@@ -431,7 +431,8 @@
                 "verifications",
                 "submissions",
                 "artifacts",
-                "messages"
+                "messages",
+                "activities"
               ],
               "type": "string",
               "title": "Collection"
@@ -542,7 +543,8 @@
                     "verifications",
                     "submissions",
                     "artifacts",
-                    "messages"
+                    "messages",
+                    "activities"
                   ],
                   "type": "string"
                 },
@@ -633,7 +635,8 @@
                 "flags",
                 "verifications",
                 "submissions",
-                "artifacts"
+                "artifacts",
+                "activities"
               ],
               "type": "string",
               "title": "Collection"
@@ -779,6 +782,85 @@
               "minimum": 1,
               "default": 100,
               "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{project_id}/attention": {
+      "get": {
+        "summary": "Attention",
+        "operationId": "attention_api_v1_projects__project_id__attention_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "max_chars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 32000,
+              "minimum": 4000,
+              "default": 12000,
+              "title": "Max Chars"
             }
           }
         ],
@@ -1159,6 +1241,28 @@
             }
           },
           {
+            "name": "requires_review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Requires Review"
+            }
+          },
+          {
+            "name": "media_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "default": "application/octet-stream",
+              "title": "Media Type"
+            }
+          },
+          {
             "name": "idempotency-key",
             "in": "header",
             "required": true,
@@ -1251,10 +1355,17 @@
       "ActorCreate": {
         "properties": {
           "name": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "pattern": "\\S",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name"
           },
           "kind": {
@@ -1296,9 +1407,6 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "name"
-        ],
         "title": "ActorCreate"
       },
       "AgentAction": {
@@ -1312,6 +1420,14 @@
               "task.renew",
               "task.complete",
               "task.release",
+              "task.assign",
+              "actor.rename",
+              "activity.report",
+              "artifact.review.request",
+              "artifact.review.decide",
+              "artifact.review.start",
+              "artifact.review.complete",
+              "artifact.archive",
               "finding.create",
               "flag.create",
               "flag.verify",

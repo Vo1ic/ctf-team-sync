@@ -54,7 +54,7 @@ def run_hook(args):
             return 0
         spool = Spool(settings, lock_timeout=0.25)
         consumer = f"{host.name}:{session}"
-        contexts, cursor = spool.context_batch(consumer)
+        contexts, cursor, message_ids = spool.hook_batch(consumer)
         if not contexts:
             print("{}", flush=True)
             return 0
@@ -62,7 +62,7 @@ def run_hook(args):
         print(json.dumps(output, ensure_ascii=False), flush=True)
         output_written = True
         # Emission is recorded after stdout flush, not represented as model processing.
-        spool.emitted(consumer, cursor)
+        spool.hook_emitted(consumer, cursor, message_ids)
     except BrokenPipeError:
         return 0
     except (DeliveryError, KeyError, ValueError, OSError, sqlite3.Error):

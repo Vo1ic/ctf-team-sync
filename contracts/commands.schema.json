@@ -68,6 +68,19 @@
         ],
         "default": null,
         "title": "Challenge Id"
+      },
+      "requested_assignee_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Requested Assignee Id"
       }
     },
     "required": [
@@ -166,6 +179,235 @@
     "title": "Release",
     "type": "object"
   },
+  "task.assign": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "recipient_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Recipient Id"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "Assign",
+    "type": "object"
+  },
+  "actor.rename": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "name": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "name"
+    ],
+    "title": "Rename",
+    "type": "object"
+  },
+  "activity.report": {
+    "additionalProperties": false,
+    "properties": {
+      "state": {
+        "enum": [
+          "idle",
+          "working",
+          "waiting_human",
+          "blocked",
+          "ready"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "detail": {
+        "default": "",
+        "maxLength": 300,
+        "title": "Detail",
+        "type": "string"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "ttl_seconds": {
+        "default": 120,
+        "maximum": 600,
+        "minimum": 30,
+        "title": "Ttl Seconds",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "state"
+    ],
+    "title": "ActivityReport",
+    "type": "object"
+  },
+  "artifact.review.request": {
+    "additionalProperties": false,
+    "properties": {
+      "recipient_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Recipient Id"
+      }
+    },
+    "title": "ReviewRequest",
+    "type": "object"
+  },
+  "artifact.review.decide": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "decision": {
+        "enum": [
+          "approved",
+          "declined"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "decision"
+    ],
+    "title": "ReviewDecision",
+    "type": "object"
+  },
+  "artifact.review.start": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "Versioned",
+    "type": "object"
+  },
+  "artifact.review.complete": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "readme": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Readme",
+        "type": "string"
+      },
+      "verdict": {
+        "default": "useful",
+        "enum": [
+          "useful",
+          "unusable"
+        ],
+        "title": "Verdict",
+        "type": "string"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "readme"
+    ],
+    "title": "ReviewFinish",
+    "type": "object"
+  },
+  "artifact.archive": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "archived": {
+        "title": "Archived",
+        "type": "boolean"
+      },
+      "reason": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "archived",
+      "reason"
+    ],
+    "title": "Archive",
+    "type": "object"
+  },
   "finding.create": {
     "additionalProperties": false,
     "properties": {
@@ -226,6 +468,19 @@
         ],
         "default": null,
         "title": "Task Id"
+      },
+      "artifact_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Artifact Id"
       }
     },
     "required": [
@@ -399,6 +654,86 @@
         "pattern": "\\S",
         "title": "Body",
         "type": "string"
+      },
+      "kind": {
+        "default": "note",
+        "enum": [
+          "note",
+          "question",
+          "assignment",
+          "status",
+          "approval",
+          "result"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "priority": {
+        "default": "normal",
+        "enum": [
+          "normal",
+          "urgent"
+        ],
+        "title": "Priority",
+        "type": "string"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "group_key": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Group Key"
+      },
+      "expires_at": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expires At"
+      },
+      "reply_to_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reply To Id"
+      },
+      "deduplicate": {
+        "default": true,
+        "title": "Deduplicate",
+        "type": "boolean"
       }
     },
     "required": [

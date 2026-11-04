@@ -62,6 +62,8 @@ class JSONLBridge:
             return self.receiver.request("GET", "inbox", params=params.model_dump())
         if method == "messages/outbox":
             return self.receiver.request("GET", "outbox", params=params.model_dump())
+        if method == "messages/attention":
+            return self.receiver.request("GET", "attention", params=params.model_dump())
         if method == "workspace/context":
             return self.receiver.request(
                 "GET", "agent-context", params=params.model_dump(exclude_none=True)

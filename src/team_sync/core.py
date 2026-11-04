@@ -1,53 +1,26 @@
 """All domain operations live here; transports never write tables directly."""
 
-import hashlib
 import json
 import secrets
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import create_engine, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from team_sync import models as m
 from team_sync import schemas as s
+from team_sync.domain import DomainError as DomainError
+from team_sync.domain import digest, fail, record
 from team_sync.settings import Settings
-
-
-class DomainError(Exception):
-    def __init__(self, status: int, code: str, detail: str):
-        self.status, self.code, self.detail = status, code, detail
-        super().__init__(detail)
-
-
-def fail(status, code, detail):
-    raise DomainError(status, code, detail)
-
-
-def digest(value: str):
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def encode(value):
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
-
-
-def record(obj):
-    return {
-        column.name: encode(getattr(obj, column.name))
-        for column in obj.__table__.columns
-        if column.name not in {"token_hash", "scope_hash"}
-    }
-
+from team_sync.workflows import WorkflowOperations, actor_records
 
 WRITE_ROLES = {"owner", "coordinator", "worker"}
 LEAD_ROLES = {"owner", "coordinator"}
 
 
-class Core:
+class Core(WorkflowOperations):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -119,12 +92,17 @@ class Core:
     def enroll(self, project_id, token, data: s.ActorCreate):
         credential = secrets.token_urlsafe(32)
         with self.context(project_id, token, write=True, roles={"owner"}) as (db, project, actor):
+            if actor.kind == "agent" and data.kind == "human":
+                fail(403, "human_identity_required", "Only a human owner can issue human access")
             if data.owner_id:
                 owner = self.get(db, m.Actor, project_id, data.owner_id)
                 if owner.kind != "human":
                     fail(422, "invalid_owner", "An agent owner must be a human actor")
             new_actor = m.Actor(
-                project_id=project_id, token_hash=digest(credential), **data.model_dump()
+                project_id=project_id,
+                token_hash=digest(credential),
+                name=self.unique_name(db, project_id, data.name, data.kind),
+                **data.model_dump(exclude={"name"}),
             )
             db.add(new_actor)
             db.flush()
@@ -135,7 +113,8 @@ class Core:
         with self.context(project_id, token) as (db, project, actor):
             return {
                 "project": record(project),
-                "actor": record(actor),
+                "actor": actor_records(db, [actor])[0],
+                "server_time": db.scalar(select(func.clock_timestamp())).isoformat(),
                 "actors": self.rows(db, m.Actor, project_id),
                 "challenges": self.rows(db, m.Challenge, project_id),
                 "tasks": self.rows(db, m.Task, project_id),
@@ -189,16 +168,16 @@ class Core:
 
     @staticmethod
     def rows(db, model, project_id, offset=0, limit=100):
-        return [
-            record(row)
-            for row in db.scalars(
+        rows = list(
+            db.scalars(
                 select(model)
                 .where(model.project_id == project_id)
                 .order_by(model.created_at, model.id)
                 .offset(offset)
                 .limit(limit)
             )
-        ]
+        )
+        return actor_records(db, rows) if model is m.Actor else [record(row) for row in rows]
 
     def listing(self, project_id, token, collection, offset=0, limit=100):
         models = {
@@ -210,6 +189,7 @@ class Core:
             "verifications": m.Verification,
             "submissions": m.Submission,
             "artifacts": m.Artifact,
+            "activities": m.Activity,
         }
         with self.context(project_id, token) as (db, _, __):
             return self.rows(db, models[collection], project_id, offset, limit)
@@ -232,6 +212,7 @@ class Core:
                 "items": items,
                 "next_cursor": items[-1]["seq"] if items else after,
                 "head": project.event_seq,
+                "server_time": db.scalar(select(func.clock_timestamp())).isoformat(),
             }
 
     def inbox(self, project_id, token, offset=0, limit=100):
@@ -280,6 +261,14 @@ class Core:
             "task.renew": (s.Lease, self.renew, WRITE_ROLES),
             "task.complete": (s.Complete, self.complete, WRITE_ROLES),
             "task.release": (s.Release, self.release, WRITE_ROLES),
+            "task.assign": (s.Assign, self.assign_task, WRITE_ROLES),
+            "actor.rename": (s.Rename, self.rename_actor, WRITE_ROLES | {"observer"}),
+            "activity.report": (s.ActivityReport, self.report_activity, WRITE_ROLES | {"observer"}),
+            "artifact.review.request": (s.ReviewRequest, self.review_request, WRITE_ROLES),
+            "artifact.review.decide": (s.ReviewDecision, self.review_decide, WRITE_ROLES),
+            "artifact.review.start": (s.Versioned, self.review_start, WRITE_ROLES),
+            "artifact.review.complete": (s.ReviewFinish, self.review_complete, WRITE_ROLES),
+            "artifact.archive": (s.Archive, self.archive_artifact, WRITE_ROLES),
             "finding.create": (s.FindingCreate, self.create_finding, WRITE_ROLES),
             "flag.create": (s.FlagCreate, self.create_flag, WRITE_ROLES),
             "flag.verify": (s.FlagVerify, self.verify_flag, LEAD_ROLES),
@@ -289,9 +278,25 @@ class Core:
         }
         schema, handler, roles = handlers[operation]
         data = schema.model_validate(arguments)
-        fingerprint = digest(
-            json.dumps([operation, resource_id, data.model_dump(mode="json")], sort_keys=True)
-        )
+        fingerprint_data = data.model_dump(mode="json")
+        # Preserve command hashes for in-flight v0.2 calls when new fields use defaults.
+        defaults = {
+            "task.create": {"requested_assignee_id": None},
+            "finding.create": {"artifact_id": None},
+            "message.send": {
+                "kind": "note",
+                "priority": "normal",
+                "task_id": None,
+                "group_key": None,
+                "expires_at": None,
+                "reply_to_id": None,
+                "deduplicate": True,
+            },
+        }.get(operation, {})
+        for field, default in defaults.items():
+            if fingerprint_data.get(field) == default:
+                fingerprint_data.pop(field, None)
+        fingerprint = digest(json.dumps([operation, resource_id, fingerprint_data], sort_keys=True))
         with self.context(project_id, token, write=True, roles=roles) as (db, project, actor):
             previous = db.get(m.Command, (project_id, actor.id, key))
             if previous is not None:
@@ -302,10 +307,22 @@ class Core:
             db.flush()
             response = record(result)
             payload = {"resource_id": response.get("id", resource_id)}
-            for field in ("version", "status", "verification_status", "stage"):
+            for field in (
+                "version",
+                "status",
+                "verification_status",
+                "stage",
+                "priority",
+                "kind",
+                "approval_status",
+            ):
                 if field in response:
                     payload[field] = response[field]
-            self.emit(db, project, actor, operation, payload)
+            payload["resource_type"] = result.__tablename__
+            if isinstance(result, m.Task) and result.artifact_id:
+                payload["artifact_id"] = result.artifact_id
+            if operation != "activity.report":  # _activity already wrote its atomic update event.
+                self.emit(db, project, actor, getattr(result, "_event_type", operation), payload)
             db.add(
                 m.Command(
                     project_id=project_id,
@@ -329,7 +346,27 @@ class Core:
     def create_task(self, db, project, actor, data, resource_id):
         if data.challenge_id:
             self.get(db, m.Challenge, project.id, data.challenge_id)
-        return self.insert(db, project, m.Task, **data.model_dump(exclude={"category"}))
+        target = (
+            self.get(db, m.Actor, project.id, data.requested_assignee_id)
+            if data.requested_assignee_id
+            else None
+        )
+        if target and (not target.active or target.role == "observer"):
+            fail(409, "inactive_recipient", "Select an active participant with permission to work")
+        task = self.insert(
+            db, project, m.Task, created_by_id=actor.id, **data.model_dump(exclude={"category"})
+        )
+        if target and target.id != actor.id:
+            self._notice(
+                db,
+                project,
+                actor,
+                target.id,
+                f"{actor.name} доручив роботу: {task.title}",
+                task,
+                "assignment",
+            )
+        return task
 
     @staticmethod
     def check_version(task, expected):
@@ -342,9 +379,33 @@ class Core:
         timestamp = db.scalar(select(func.clock_timestamp()))
         if task.status == "done" or (task.lease_until and task.lease_until > timestamp):
             fail(409, "task_unavailable", "Task is completed or has a live lease")
+        if task.requested_assignee_id not in (None, actor.id):
+            fail(403, "task_reserved", "This task is addressed to another participant")
+        previous_assignee = task.assignee_id
+        if task.kind == "artifact_review":
+            artifact = self.get(db, m.Artifact, project.id, task.artifact_id)
+            if actor.kind != "agent" or artifact.archived:
+                fail(
+                    409,
+                    "review_unavailable",
+                    "An active artifact review must be claimed by an agent",
+                )
+            if previous_assignee != actor.id:
+                task.approval_status, task.approved_by_id, task.analysis_started_at = (
+                    "pending",
+                    None,
+                    None,
+                )
         task.assignee_id, task.status = actor.id, "running"
         task.lease_until = timestamp + timedelta(seconds=data.lease_seconds)
         task.version += 1
+        if task.kind == "artifact_review" and task.approval_status == "pending":
+            self._approval_request(db, project, actor, task)
+            self._activity(
+                db, project, actor, actor, "waiting_human", "Очікує дозволу на аналіз", task
+            )
+        else:
+            self._activity(db, project, actor, actor, self.task_activity(task), task.title, task)
         return task
 
     def owned_task(self, db, project, actor, data, resource_id):
@@ -364,12 +425,28 @@ class Core:
         task, timestamp = self.owned_task(db, project, actor, data, resource_id)
         task.lease_until = timestamp + timedelta(seconds=data.lease_seconds)
         task.version += 1
+        self._activity(
+            db,
+            project,
+            actor,
+            actor,
+            self.task_activity(task),
+            task.title,
+            task,
+        )
         return task
 
     def complete(self, db, project, actor, data, resource_id):
         task, _ = self.owned_task(db, project, actor, data, resource_id)
+        if task.kind == "artifact_review":
+            fail(
+                409,
+                "review_report_required",
+                "Complete artifact analysis with a README and verdict",
+            )
         task.status, task.result, task.lease_until = "done", data.result, None
         task.version += 1
+        self._after_task(db, project, actor)
         return task
 
     def release(self, db, project, actor, data, resource_id):
@@ -385,10 +462,19 @@ class Core:
             kind="observation",
             task_id=task.id,
             challenge_id=task.challenge_id,
+            artifact_id=task.artifact_id,
         )
         self.emit(db, project, actor, "finding.create", {"resource_id": finding.id})
         task.status, task.assignee_id, task.lease_until = "open", None, None
+        task.requested_assignee_id = None
+        if task.kind == "artifact_review":
+            task.approval_status, task.approved_by_id, task.analysis_started_at = (
+                "pending",
+                None,
+                None,
+            )
         task.version += 1
+        self._after_task(db, project, actor)
         return task
 
     def create_finding(self, db, project, actor, data, resource_id):
@@ -398,6 +484,8 @@ class Core:
             task = self.get(db, m.Task, project.id, data.task_id)
             if data.challenge_id and task.challenge_id != data.challenge_id:
                 fail(422, "scope_mismatch", "Finding challenge does not match its task")
+        if data.artifact_id:
+            self.get(db, m.Artifact, project.id, data.artifact_id)
         return self.insert(db, project, m.Finding, author_id=actor.id, **data.model_dump())
 
     def create_flag(self, db, project, actor, data, resource_id):
@@ -456,7 +544,9 @@ class Core:
     def send_message(self, db, project, actor, data, resource_id):
         if data.recipient_id:
             self.get(db, m.Actor, project.id, data.recipient_id)
-        return self.insert(db, project, m.Message, sender_id=actor.id, **data.model_dump())
+        from team_sync.attention import create_message
+
+        return create_message(self, db, project, actor, data)
 
     def ack_message(self, db, project, actor, data, resource_id):
         message = self.get(db, m.Message, project.id, resource_id)
@@ -474,16 +564,37 @@ class Core:
             receipt.stage, receipt.updated_at = data.stage, m.now()
         return receipt
 
-    def add_artifact(self, project_id, token, name, sha256, size, key):
+    def add_artifact(
+        self,
+        project_id,
+        token,
+        name,
+        sha256,
+        size,
+        key,
+        requires_review=False,
+        media_type="application/octet-stream",
+    ):
         with self.context(project_id, token, write=True, roles=WRITE_ROLES) as (db, project, actor):
-            fingerprint = digest(json.dumps(["artifact.publish", name, sha256, size]))
+            fields = ["artifact.publish", name, sha256, size]
+            if requires_review or media_type != "application/octet-stream":
+                fields += [{"requires_review": requires_review, "media_type": media_type}]
+            fingerprint = digest(json.dumps(fields))
             previous = db.get(m.Command, (project_id, actor.id, key))
             if previous is not None:
                 if previous.fingerprint != fingerprint:
                     fail(409, "idempotency_conflict", "Key was already used for another command")
                 return previous.response
             artifact = self.insert(
-                db, project, m.Artifact, name=name, sha256=sha256, size=size, author_id=actor.id
+                db,
+                project,
+                m.Artifact,
+                name=name,
+                sha256=sha256,
+                size=size,
+                author_id=actor.id,
+                requires_review=requires_review,
+                media_type=media_type,
             )
             self.emit(db, project, actor, "artifact.published", {"resource_id": artifact.id})
             response = record(artifact)
@@ -499,5 +610,37 @@ class Core:
             return response
 
     def artifact(self, project_id, token, artifact_id):
-        with self.context(project_id, token) as (db, _, __):
-            return record(self.get(db, m.Artifact, project_id, artifact_id))
+        with self.context(project_id, token) as (db, _, actor):
+            artifact = self.get(db, m.Artifact, project_id, artifact_id)
+            if actor.kind == "agent":
+                if artifact.archived:
+                    fail(410, "artifact_archived", "The artifact has been archived")
+                if artifact.requires_review:
+                    timestamp = db.scalar(select(func.clock_timestamp()))
+                    approved = db.scalar(
+                        select(m.Task.id)
+                        .where(
+                            m.Task.project_id == project_id,
+                            m.Task.artifact_id == artifact_id,
+                            m.Task.kind == "artifact_review",
+                            m.Task.approval_status == "approved",
+                            m.Task.assignee_id == actor.id,
+                            m.Task.status == "running",
+                            m.Task.lease_until > timestamp,
+                            m.Task.analysis_started_at.is_not(None),
+                        )
+                        .limit(1)
+                    )
+                    if not approved:
+                        fail(
+                            403,
+                            "analysis_not_approved",
+                            "Claim review, obtain human approval, then start before downloading",
+                        )
+            return record(artifact)
+
+    def attention(self, project_id, token, query):
+        from team_sync.attention import attention
+
+        with self.context(project_id, token) as (db, project, actor):
+            return attention(db, project, actor, query)

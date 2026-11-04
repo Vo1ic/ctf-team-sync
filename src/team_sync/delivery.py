@@ -7,6 +7,7 @@ import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -104,6 +105,10 @@ class Spool:
             );
             CREATE UNIQUE INDEX IF NOT EXISTS one_pending_batch
                 ON delivery_batches(consumer) WHERE acked=0;
+            CREATE TABLE IF NOT EXISTS hook_messages (
+                consumer TEXT NOT NULL, message_id TEXT NOT NULL,
+                PRIMARY KEY(consumer, message_id)
+            );
         """)
         self.db.execute("PRAGMA user_version=1")
         expected = json.dumps(settings.binding(), sort_keys=True)
@@ -153,8 +158,11 @@ class Spool:
                 raise DeliveryError("Delivery cache actor does not match the remote identity")
             self.set_meta("actor_id", actor_id)
 
-    def ingest(self, events, contexts, receipts, actor_id, processed=()):
+    def ingest(self, events, contexts, receipts, actor_id, processed=(), attention=None):
         with self.transaction():
+            if attention is not None:
+                attention = {**attention, "cached_at": datetime.now(UTC).isoformat()}
+                self.set_meta("attention", json.dumps(attention))
             cursor = self.cursor
             for event in events:
                 if event["seq"] <= cursor:
@@ -242,9 +250,78 @@ class Spool:
             (consumer, cursor),
         )
 
+    def hook_batch(self, consumer, limit=12, max_chars=6000):
+        """Prioritize the latest attention snapshot without reordering journal cursors."""
+        snapshot = self.get_meta("attention")
+        if not snapshot:
+            items, cursor = self.context_batch(consumer, limit, max_chars)
+            return items, cursor, []
+        if self.get_meta("blocked"):
+            return [], 0, []
+        seen = {
+            row[0]
+            for row in self.db.execute(
+                "SELECT message_id FROM hook_messages WHERE consumer=?", (consumer,)
+            )
+        }
+        contexts, ids = [], []
+        snapshot = json.loads(snapshot)
+        timestamp = datetime.fromisoformat(snapshot["server_time"]) + (
+            datetime.now(UTC) - datetime.fromisoformat(snapshot["cached_at"])
+        )
+        for item in snapshot["items"]:
+            if item["id"] in seen or (
+                item.get("expires_at") and datetime.fromisoformat(item["expires_at"]) <= timestamp
+            ):
+                continue
+            message = {
+                **item,
+                "body": item["body"][:2000],
+                "body_truncated": item.get("body_truncated", False) or len(item["body"]) > 2000,
+            }
+            context = {"kind": "message", "source": "attention", "message": message}
+            while len(json.dumps(contexts + [context], ensure_ascii=False)) > max_chars:
+                if len(message["body"]) < 40:
+                    break
+                message["body"] = message["body"][: len(message["body"]) // 2]
+                message["body_truncated"] = True
+            if len(json.dumps(contexts + [context], ensure_ascii=False)) > max_chars:
+                break
+            contexts.append(context)
+            ids.append(item["id"])
+            if len(contexts) >= limit:
+                break
+        row = self.db.execute(
+            "SELECT emitted_cursor FROM consumers WHERE name=?", (consumer,)
+        ).fetchone()
+        cursor = row[0] if row else 0
+        for row in self.db.execute(
+            "SELECT seq,context FROM events WHERE seq>? AND context IS NOT NULL "
+            "AND message_id IS NULL ORDER BY seq LIMIT ?",
+            (cursor, limit),
+        ).fetchall():
+            context = json.loads(row["context"])
+            if (
+                len(contexts) >= limit
+                or len(json.dumps(contexts + [context], ensure_ascii=False)) > max_chars
+            ):
+                break
+            contexts.append(context)
+            cursor = row["seq"]
+        return contexts, cursor, ids
+
+    def hook_emitted(self, consumer, cursor, message_ids):
+        with self.transaction():
+            self.emitted(consumer, cursor)
+            self.db.executemany(
+                "INSERT OR IGNORE INTO hook_messages VALUES (?,?)",
+                [(consumer, ident) for ident in message_ids],
+            )
+
     def replay(self, consumer):
         with self.transaction():
             self.db.execute("DELETE FROM consumers WHERE name=?", (consumer,))
+            self.db.execute("DELETE FROM hook_messages WHERE consumer=?", (consumer,))
             self.db.execute(
                 "DELETE FROM delivery_batches WHERE consumer=? AND acked=0", (consumer,)
             )
@@ -332,6 +409,13 @@ CONTEXT_EVENTS = {
     "task.create",
     "task.claim",
     "task.complete",
+    "task.release",
+    "task.assign",
+    "artifact.review.request",
+    "artifact.review.decide",
+    "artifact.review.start",
+    "artifact.review.complete",
+    "artifact.archive",
     "finding.create",
     "flag.create",
     "flag.verify",
@@ -401,6 +485,12 @@ class Receiver:
         self.flush_receipts()
         after = self.spool.cursor
         batch = self.request("GET", "events/wait", params={"after": after, "timeout": timeout})
+        try:
+            attention = self.request("GET", "attention", params={"limit": 50})
+        except RemoteError as error:
+            if error.status != 404:
+                raise
+            attention = None  # Older servers retain their FIFO delivery behavior.
         contexts, receipts, events, processed = {}, [], [], []
         for raw in batch["items"]:
             try:
@@ -442,8 +532,15 @@ class Receiver:
         if events:
             if batch["next_cursor"] != events[-1]["seq"]:
                 raise DeliveryError("Event batch cursor does not match its final event")
-            self.spool.ingest(events, contexts, receipts, self.actor_id, processed)
         elif batch["next_cursor"] != after:
             raise DeliveryError("An empty event batch cannot advance the cursor")
+        if attention:
+            attention["items"] = [
+                item
+                for item in attention["items"]
+                if not (item["sender_id"] == self.actor_id and item["recipient_id"] is None)
+            ]
+            receipts.extend(item["id"] for item in attention["items"] if not item["ack_stage"])
+        self.spool.ingest(events, contexts, receipts, self.actor_id, processed, attention)
         self.flush_receipts()
         return len(events)

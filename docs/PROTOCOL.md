@@ -38,16 +38,24 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | operation | resource_id | arguments |
 | --- | --- | --- |
 | challenge.create | не потрібен | title, description?, category? |
-| task.create | не потрібен | title, description?, challenge_id? |
+| task.create | не потрібен | title, description?, challenge_id?, requested_assignee_id? |
 | task.claim | task | expected_version, lease_seconds? |
 | task.renew | task | expected_version, lease_seconds? |
 | task.complete | task | expected_version, result |
 | task.release | task | expected_version, reason |
-| finding.create | не потрібен | title, body, evidence, kind?, challenge_id?, task_id? |
+| task.assign | task | expected_version, recipient_id? (null = будь-хто) |
+| actor.rename | actor | expected_version, name |
+| activity.report | не потрібен | state, detail?, task_id?, ttl_seconds? |
+| artifact.review.request | artifact | recipient_id? (для агента default self) |
+| artifact.review.decide | task | expected_version, decision, note?; лише людина |
+| artifact.review.start | task | expected_version |
+| artifact.review.complete | task | expected_version, readme, verdict?, reason? |
+| artifact.archive | artifact | expected_version, archived, reason; пряме рішення людини |
+| finding.create | не потрібен | title, body, evidence, kind?, challenge_id?, task_id?, artifact_id? |
 | flag.create | не потрібен | value, challenge_id?, target?, round?, expires_at? |
 | flag.verify | flag | expected_version, status, method, evidence |
 | submission.create | flag | outcome, evidence |
-| message.send | не потрібен | body, recipient_id? (null = broadcast) |
+| message.send | не потрібен | body, recipient_id?, kind?, priority?, task_id?, group_key?, expires_at?, reply_to_id?, deduplicate? |
 | message.ack | message | stage |
 
 Повні аргументи та enums: `contracts/commands.schema.json` або MCP
@@ -64,6 +72,11 @@ coordinator; сервер сам не виконує локальний checker 
   колекції: actors, challenges, tasks, findings, flags, verifications, submissions, artifacts.
 - `GET /projects/{project}/inbox?offset=0&limit=100` — доступні повідомлення й
   власний ack_stage. Читання не змінює стан.
+- `GET /projects/{project}/attention?offset=0&limit=20&max_chars=12000` — pending проєкція: priority,
+  чергування авторів, згортання typed status, приховані expired/processed. `items`,
+  `total`, `has_more`; limit ≤50, max_chars 4000–32000. Тіла скорочені до 2000
+  символів із body_truncated та посиланням на повний ресурс. Наступний offset
+  збільшуємо на фактичну кількість items. Читання не є ack; повна історія — inbox.
 - `GET /projects/{project}/outbox?offset=0&limit=100` — лише власні вихідні;
   `recipient_ack_stage` конкретного адресата, null для broadcast/відсутнього ack.
 - `GET /projects/{project}/agent-context?limit=5&max_chars=12000` — обмежений
@@ -112,9 +125,15 @@ event stream. Отримання події не підтверджує обро
 `POST /projects/{project}/artifacts?name=sample.bin` — сирі байти, header
 `Idempotency-Key`, до 64 MiB за замовчуванням. Повертає id, sha256, size, name.
 Ім'я є метаданими; сервер не використовує його як шлях збереження.
+Додаткові query: `requires_review=false` і `media_type=application/octet-stream`.
+Старі клієнти зберігають спільне завантаження без дозволів; веб завжди передає
+`requires_review=true`. Preview дозволяє лише растрові зображення та plain text.
 
 `GET /projects/{project}/artifacts/{artifact}/content` — байти та header
 `X-Content-SHA256`. Перед використанням клієнт перевіряє хеш.
+Для agent identity захищений content потребує власного чинного approved review
+після explicit start. Архів дає агенту 410. Людина має доступ для перегляду й
+відновлення. Деталі: [ADR 0003](adr/0003-human-reviews-and-agent-attention.md).
 
 ## Помилки
 
@@ -122,6 +141,8 @@ event stream. Отримання події не підтверджує обро
 відсутній або належить іншому проєкту; 409 — конфлікт версії, lease, дубль флага
 чи повторне використання ключа з іншими аргументами; 413 — завеликий файл;
 422 — неправильна структура чи аргументи.
+429 — бюджет повідомлень вичерпано, `Retry-After: 60`; replay старого ключа та
+receipts доступні. 410 — артефакт архівовано для agent identity.
 
 Доменна помилка має `code` та `detail`. Помилки валідації HTTP framework можуть
 мати стандартний `detail` без `code`; клієнт повинен враховувати обидві форми.

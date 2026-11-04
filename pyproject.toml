@@ -1,6 +1,6 @@
 [project]
 name = "ctf-team-sync"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared coordination for CTF teams and heterogeneous AI agents"
 readme = "README.md"
 license = "Apache-2.0"

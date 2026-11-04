@@ -35,6 +35,14 @@
             "task.renew",
             "task.complete",
             "task.release",
+            "task.assign",
+            "actor.rename",
+            "activity.report",
+            "artifact.review.request",
+            "artifact.review.decide",
+            "artifact.review.start",
+            "artifact.review.complete",
+            "artifact.archive",
             "finding.create",
             "flag.create",
             "flag.verify",
@@ -75,6 +83,34 @@
         "idempotency_key"
       ],
       "title": "AgentAction",
+      "type": "object"
+    },
+    "AttentionQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "default": 0,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_chars": {
+          "default": 12000,
+          "maximum": 32000,
+          "minimum": 4000,
+          "title": "Max Chars",
+          "type": "integer"
+        }
+      },
+      "title": "AttentionQuery",
       "type": "object"
     },
     "ClientInfo": {
@@ -146,7 +182,8 @@
             "verifications",
             "submissions",
             "artifacts",
-            "messages"
+            "messages",
+            "activities"
           ],
           "title": "Collection",
           "type": "string"
@@ -232,7 +269,8 @@
             "flags",
             "verifications",
             "submissions",
-            "artifacts"
+            "artifacts",
+            "activities"
           ],
           "title": "Collection",
           "type": "string"
@@ -311,7 +349,8 @@
                 "verifications",
                 "submissions",
                 "artifacts",
-                "messages"
+                "messages",
+                "activities"
               ],
               "type": "string"
             },
@@ -614,6 +653,48 @@
       "title": "events_syncRequest",
       "type": "object"
     },
+    "messages_attentionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "method": {
+          "const": "messages/attention",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/AttentionQuery"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "messages_attentionRequest",
+      "type": "object"
+    },
     "messages_inboxRequest": {
       "additionalProperties": false,
       "properties": {
@@ -874,6 +955,7 @@
       "context/ack": "#/$defs/context_ackRequest",
       "context/read": "#/$defs/context_readRequest",
       "events/sync": "#/$defs/events_syncRequest",
+      "messages/attention": "#/$defs/messages_attentionRequest",
       "messages/inbox": "#/$defs/messages_inboxRequest",
       "messages/outbox": "#/$defs/messages_outboxRequest",
       "protocol/hello": "#/$defs/protocol_helloRequest",
@@ -907,6 +989,9 @@
     },
     {
       "$ref": "#/$defs/messages_outboxRequest"
+    },
+    {
+      "$ref": "#/$defs/messages_attentionRequest"
     },
     {
       "$ref": "#/$defs/workspace_contextRequest"

@@ -79,7 +79,7 @@ def test_personal_context_is_bounded_scoped_and_does_not_ack(client, project):
     )
     observer = enroll(client, project, role="observer")
     context = get(client, project, "agent-context", observer["token"]).json()
-    assert context["allowed_operations"] == ["message.ack"]
+    assert context["allowed_operations"] == ["message.ack", "actor.rename", "activity.report"]
     assert all(
         not task["can_claim"] and task["available_actions"] == []
         for task in context["sections"]["available_tasks"]["items"]
@@ -216,7 +216,7 @@ def test_release_preserves_handoff_atomically_and_fences_stale_worker(
         execute(client, project, "task.release", action, task["id"], first["token"], key).json()
         == released
     )
-    assert get(client, project, "events").json()["head"] == head + 2
+    assert get(client, project, "events").json()["head"] == head + 3
     assert (
         get(client, project, "collections/findings").json()["items"][0]["body"] == action["reason"]
     )

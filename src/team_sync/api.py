@@ -29,6 +29,7 @@ Collection = Literal[
     "verifications",
     "submissions",
     "artifacts",
+    "activities",
 ]
 
 
@@ -69,7 +70,7 @@ def create_app(settings: Settings | None = None):
         yield
         core.engine.dispose()
 
-    app = FastAPI(title="CTF Team Sync", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="CTF Team Sync", version="0.3.0", lifespan=lifespan)
     app.state.core = core
 
     @app.middleware("http")
@@ -83,7 +84,7 @@ def create_app(settings: Settings | None = None):
             response.headers["Cache-Control"] = "no-cache"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self'; "
-                "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+                "connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; "
                 "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
             )
         return response
@@ -93,7 +94,13 @@ def create_app(settings: Settings | None = None):
         return JSONResponse(
             status_code=exc.status,
             content={"code": exc.code, "detail": exc.detail},
-            headers={"WWW-Authenticate": "Bearer"} if exc.status == 401 else None,
+            headers=(
+                {"WWW-Authenticate": "Bearer"}
+                if exc.status == 401
+                else {"Retry-After": "60"}
+                if exc.status == 429
+                else None
+            ),
         )
 
     @app.exception_handler(ValidationError)
@@ -214,6 +221,10 @@ def create_app(settings: Settings | None = None):
     ):
         return {"items": core.inbox(project_id, token, offset, limit)}
 
+    @app.get("/api/v1/projects/{project_id}/attention")
+    def attention(project_id: s.ID, token: Token, query: Annotated[s.AttentionQuery, Query()]):
+        return core.attention(project_id, token, query)
+
     @app.get("/api/v1/projects/{project_id}/outbox")
     def outbox(
         project_id: s.ID,
@@ -294,6 +305,10 @@ def create_app(settings: Settings | None = None):
         token: Token,
         idempotency_key: Annotated[str, Header(min_length=1, max_length=128)],
         name: Annotated[str, Query(min_length=1, max_length=255, pattern=r"^[^/\\\x00-\x1f]+$")],
+        requires_review: bool = False,
+        media_type: Annotated[
+            str, Query(min_length=1, max_length=120)
+        ] = "application/octet-stream",
     ):
         def authorize():
             with core.context(project_id, token, roles=WRITE_ROLES):
@@ -332,7 +347,15 @@ def create_app(settings: Settings | None = None):
 
                 await run_in_threadpool(publish_bytes)
                 return await run_in_threadpool(
-                    core.add_artifact, project_id, token, name, sha256, size, idempotency_key
+                    core.add_artifact,
+                    project_id,
+                    token,
+                    name,
+                    sha256,
+                    size,
+                    idempotency_key,
+                    requires_review,
+                    media_type,
                 )
             finally:
                 temp_path.unlink(missing_ok=True)

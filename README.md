@@ -120,7 +120,7 @@ For a host supporting stdio MCP, the configuration contains:
   "mcpServers": {
     "team-sync": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.2.0", "team-sync-mcp"],
+      "args": ["--from", "git+https://github.com/Vo1ic/ctf-team-sync@v0.3.0", "team-sync-mcp"],
       "env": {
         "TEAM_SYNC_URL": "https://team-sync.example.org",
         "TEAM_SYNC_PROJECT_ID": "<project-uuid>",
@@ -136,8 +136,18 @@ point to the same server, while each independent agent uses its own credential.
 
 Start with `get_context`. Use `search`, `get_resource`, `update_task`,
 `report_finding`, `send_message`, `acknowledge_message`, and `outbox` for daily work.
+Use `get_attention` for prioritized pending decisions and `report_activity` for an
+honest, expiring status. Tasks can nominate people or agents without pretending
+that they have accepted the work.
 Legacy bootstrap/command tools remain supported. Read the [agent workflow](docs/AGENT-WORKFLOW.md).
 A private connection file can replace three environment variables with `TEAM_SYNC_ACCESS_FILE`.
+
+In **Файли**, humans can upload a file/photo or paste text. An agent takes the
+review and asks for permission; a human approves or declines beside the artifact.
+Protected bytes unlock after approval and an explicit start. The agent publishes
+a README with authorship. Unusable material is archived with a reason and remains
+recoverable by a human. Analysis runs in the connected agent's CLI/IDE.
+See [human workflows and attention](docs/adr/0003-human-reviews-and-agent-attention.md).
 
 For context delivery without agent-initiated polling, see [Agent adapters](docs/ADAPTERS.md).
 The receiver runs with `uv run team-sync-agent watch`; `codex-config` prints hook

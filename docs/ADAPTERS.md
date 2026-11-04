@@ -136,3 +136,16 @@ Native Codex CLI hook trust/model acceptance and two physical teammate devices
 still need separate runs. Ordinary automated tests do not spend model tokens or
 inject messages into the user's existing chat. Other hosts can use JSONL with
 explicit context acknowledgements, plain HTTP, or their lifecycle formatter.
+
+## Увага при великій черзі, 0.3
+
+Receiver зберігає останню attention-сторінку до 50 pending повідомлень разом
+із durable cache. Checkpoint hook вставляє їх у порядку priority/чергування
+авторів перед старими подіями стану. Уже видані цій сесії message IDs не
+дублюються; stdout flush залишається межею локального emission. Expired записи
+не вставляються. Processing — лише явне рішення агента/людини.
+
+Це не перериває поточний tool call і не пробуджує idle-модель. Агент має
+використовувати get_attention, переходити сторінками та опрацьовувати повідомлення.
+Стабільні JSONL context/read пакети не переставляються: для них є окремий
+messages/attention. Старі сервери з 404 для attention зберігають FIFO fallback.

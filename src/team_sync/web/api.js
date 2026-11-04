@@ -55,6 +55,13 @@ function errorMessage(body, status) {
     invalid_cursor: "Курсор не відповідає журналу CTF. Підключіться повторно.",
     browser_origin_required:
       "Відкрийте Team Sync з адреси цього сервера й повторіть дію.",
+    task_reserved: "Роботу адресовано іншому учаснику.",
+    analysis_not_approved:
+      "Агент має отримати дозвіл людини й розпочати аналіз.",
+    artifact_archived: "Артефакт архівовано. Людина може його відновити.",
+    review_in_progress: "Цей артефакт уже аналізує інший агент.",
+    message_rate_limit: "Забагато повідомлень. Повторіть через хвилину.",
+    urgent_rate_limit: "Ліміт термінових повідомлень вичерпано на хвилину.",
   };
   if (labels[body?.code]) return labels[body.code];
   if (Array.isArray(body?.detail)) {
@@ -191,9 +198,11 @@ export class ApiClient {
     }
   }
 
-  async upload(file, key) {
+  async upload(file, key, { requiresReview = false } = {}) {
     return this.request(
-      this.path(`artifacts?name=${encodeURIComponent(file.name)}`),
+      this.path(
+        `artifacts?name=${encodeURIComponent(file.name)}&requires_review=${requiresReview}&media_type=${encodeURIComponent(file.type || "application/octet-stream")}`,
+      ),
       {
         method: "POST",
         raw: true,

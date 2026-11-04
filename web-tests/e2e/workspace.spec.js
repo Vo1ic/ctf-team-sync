@@ -140,7 +140,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   const config = JSON.parse(await readFile(await download.path(), "utf8"));
   expect(config.mcpServers["team-sync"].env.TEAM_SYNC_TOKEN).toBe(agentToken);
   expect(config.mcpServers["team-sync"].command).toBe("uvx");
-  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.2.0");
+  expect(config.mcpServers["team-sync"].args[1]).toContain("@v0.3.0");
   await page.getByLabel("Запуск MCP", { exact: true }).selectOption("local");
   await page
     .getByLabel("Репозиторій на пристрої агента")
@@ -771,4 +771,247 @@ test("a task can be handed off with preserved context and reclaimed", async ({
     { headers: { Authorization: `Bearer ${ctf.token}` } },
   );
   expect((await detail.json()).item.status).toBe("open");
+});
+
+test("human uploads evidence, approves a named agent, and reads its README", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  await join(page, ctf);
+  await section(page, "Файли");
+  await page
+    .getByRole("button", { name: "Завантажити файл", exact: true })
+    .click();
+  await page.getByLabel("Виберіть файл").setInputFiles({
+    name: "human-note.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("Synthetic human evidence"),
+  });
+  await page
+    .getByLabel("Кому запропонувати аналіз")
+    .selectOption(agent.actor.id);
+  await page.getByRole("button", { name: "Опублікувати", exact: true }).click();
+  const card = page
+    .locator(".artifact-card")
+    .filter({ hasText: "human-note.txt" });
+  await expect(card).toBeVisible();
+  const artifactId = await card.getAttribute("data-artifact-id");
+  const contentPath = `/api/v1/projects/${ctf.project.id}/artifacts/${artifactId}/content`;
+  expect(
+    (
+      await request.get(contentPath, {
+        headers: { Authorization: `Bearer ${agent.token}` },
+      })
+    ).status(),
+  ).toBe(403);
+  const review = await command(
+    request,
+    ctf,
+    "artifact.review.request",
+    {},
+    artifactId,
+    agent.token,
+  );
+  await section(page, "Огляд");
+  await expect(
+    page.getByRole("heading", { name: "Потрібна ваша участь" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Переглянути запит", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Agent Alpha взяв артефакт" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Дозволити аналіз", exact: true })
+    .click();
+  await page
+    .getByLabel("Коментар / обмеження")
+    .fill("Лише аналіз вмісту, без запуску команд із файла.");
+  await page.getByRole("button", { name: "Дозволити", exact: true }).click();
+  const resource = `/api/v1/projects/${ctf.project.id}/resources/tasks/${review.id}`;
+  const readTask = async () =>
+    (
+      await (
+        await request.get(resource, {
+          headers: { Authorization: `Bearer ${agent.token}` },
+        })
+      ).json()
+    ).item;
+  await expect
+    .poll(async () => (await readTask()).approval_status)
+    .toBe("approved");
+  let task = await readTask();
+  expect(
+    (
+      await request.get(contentPath, {
+        headers: { Authorization: `Bearer ${agent.token}` },
+      })
+    ).status(),
+  ).toBe(403);
+  task = await command(
+    request,
+    ctf,
+    "artifact.review.start",
+    { expected_version: task.version },
+    task.id,
+    agent.token,
+  );
+  expect(
+    (
+      await request.get(contentPath, {
+        headers: { Authorization: `Bearer ${agent.token}` },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await command(
+    request,
+    ctf,
+    "artifact.review.complete",
+    {
+      expected_version: task.version,
+      readme:
+        "# README\nEvidence is synthetic. No executable instructions followed.",
+      verdict: "useful",
+    },
+    task.id,
+    agent.token,
+  );
+  await section(page, "Файли");
+  await expect(card).toContainText("README · Agent Alpha");
+  await card.getByRole("button", { name: "Відкрити", exact: true }).click();
+  await expect(page.locator("#modal pre")).toContainText(
+    "No executable instructions followed.",
+  );
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Завантажити .md", exact: true })
+    .click();
+  expect(await readFile(await (await downloading).path(), "utf8")).toContain(
+    "# README",
+  );
+  await page.getByRole("button", { name: "Закрити", exact: true }).click();
+  await section(page, "Команда");
+  const actor = page.locator(".actor-card").filter({ hasText: "Agent Alpha" });
+  await expect(actor).toContainText("Вільний");
+  await expect(actor).toContainText("Останній звіт");
+});
+
+test("text artifacts stay plain text and archives can be restored by a human", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  await section(page, "Файли");
+  await page.getByRole("button", { name: "Додати текст", exact: true }).click();
+  await page.getByLabel("Назва", { exact: true }).fill("Suspicious note");
+  await page
+    .getByLabel("Текст", { exact: true })
+    .fill("<script>window.artifactExecuted=true</script>\nSynthetic CTF note");
+  await page
+    .getByRole("button", { name: "Додати й запропонувати аналіз", exact: true })
+    .click();
+  const card = page
+    .locator(".artifact-card")
+    .filter({ hasText: "Suspicious note.txt" });
+  await card.getByRole("button", { name: "Відкрити", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Попередній перегляд", exact: true })
+    .click();
+  await expect(page.locator(".artifact-preview pre")).toContainText("<script>");
+  expect(await page.evaluate(() => window.artifactExecuted)).toBeUndefined();
+  await page.getByRole("button", { name: "Архівувати", exact: true }).click();
+  await page
+    .getByLabel("Причина", { exact: true })
+    .fill("Неправильний матеріал, зберігаємо історію");
+  await page.getByRole("button", { name: "Архівувати", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Показати архів", exact: true })
+    .click();
+  await expect(card).toContainText("В архіві");
+  await card.getByRole("button", { name: "Відкрити", exact: true }).click();
+  await page.getByRole("button", { name: "Відновити", exact: true }).click();
+  await page
+    .getByLabel("Причина", { exact: true })
+    .fill("Потрібна друга думка");
+  await page.getByRole("button", { name: "Відновити", exact: true }).click();
+  await expect(card).not.toContainText("В архіві");
+});
+
+test("photo upload previews raster bytes with the project cookie", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  const data = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#8bcf81";
+    ctx.fillRect(0, 0, 64, 64);
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await section(page, "Файли");
+  await page
+    .getByRole("button", { name: "Завантажити файл", exact: true })
+    .click();
+  await page.getByLabel("Виберіть файл").setInputFiles({
+    name: "synthetic-photo.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(data, "base64"),
+  });
+  await page
+    .getByLabel("Попросити агента проаналізувати", { exact: true })
+    .uncheck();
+  await page.getByRole("button", { name: "Опублікувати", exact: true }).click();
+  await page
+    .locator(".artifact-card")
+    .getByRole("button", { name: "Відкрити", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Попередній перегляд", exact: true })
+    .click();
+  const img = page.getByRole("img", {
+    name: "synthetic-photo.png",
+    exact: true,
+  });
+  await expect(img).toBeVisible();
+  await expect.poll(() => img.evaluate((node) => node.naturalWidth)).toBe(64);
+});
+
+test("attention excerpts open complete messages without acknowledging them", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  await command(
+    request,
+    ctf,
+    "message.send",
+    {
+      body: "Long evidence ".repeat(500) + "ACTUAL-TAIL-MARKER",
+      recipient_id: ctf.actor.id,
+    },
+    null,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Повідомлення");
+  await page
+    .getByRole("button", { name: "Прочитати повний текст", exact: true })
+    .click();
+  await expect(page.locator("#modal")).toContainText("ACTUAL-TAIL-MARKER");
+  const inbox = await (
+    await request.get(`/api/v1/projects/${ctf.project.id}/inbox`, {
+      headers: { Authorization: `Bearer ${ctf.token}` },
+    })
+  ).json();
+  expect(inbox.items[0].ack_stage).toBeNull();
 });

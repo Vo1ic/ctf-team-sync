@@ -113,3 +113,20 @@ idle-сесії та переривання запущеного інструм�
 [Claude Code hooks](https://code.claude.com/docs/en/hooks),
 [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode),
 [Codex hooks і trust](https://learn.chatgpt.com/docs/hooks).
+
+## 0.3: native Claude Code — артефакт і дозвіл
+
+2026-11-04 виконано два справжні запуски Claude Code у виділеному синтетичному
+проєкті `7ec5d38c-0bc5-46b6-8e34-0f547894faca`, agent identity Lumen.
+Перший запитав review через MCP, отримав відмову при завантаженні до дозволу
+і звітував waiting_human. Після цього acceptance harness **симулював** human
+approval через окремий тестовий human credential; це не приписується реальній
+людині. Другий запуск прочитав актуальний task і attention, явно почав аналіз,
+завантажив файл, прочитав його засобом Read, опублікував README з випадковим
+маркером із самого файла, завершив роботу й підтвердив approval processed.
+
+Перевірено серверний стан і точний маркер у повному Finding. До дозволу локального
+файла не створено. Bash, зовнішні цілі, spawning та інші MCP-конфігурації вимкнено.
+Приватні credentials, transcript і машинний звіт залишаються у gitignored
+`.team-sync/review-live/v03/`. Тест не доводить автоматичного пробудження host:
+другий запуск явно ініціював harness.

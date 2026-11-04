@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, TypeAdapter, creat
 from team_sync.schemas import (
     ID,
     AgentAction,
+    AttentionQuery,
     Input,
     ResourceCollection,
     SearchQuery,
@@ -58,6 +59,7 @@ class ListItems(Input):
         "verifications",
         "submissions",
         "artifacts",
+        "activities",
     ]
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=500)
@@ -91,6 +93,7 @@ METHODS = {
     "collections/list": ListItems,
     "messages/inbox": Inbox,
     "messages/outbox": Inbox,
+    "messages/attention": AttentionQuery,
     "workspace/context": WorkspaceQuery,
     "resources/get": GetResource,
     "resources/search": SearchQuery,

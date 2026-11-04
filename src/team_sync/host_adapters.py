@@ -51,6 +51,10 @@ def capabilities(host="generic"):
         "workspace_context": True,
         "resource_search": True,
         "task_handoff": "explicit_release_with_reason",
+        "human_approved_artifact_review": True,
+        "named_task_assignment": True,
+        "expiring_activity_reports": True,
+        "attention": "explicit_query" if host == "generic" else "priority_snapshot_at_checkpoint",
         "connection_file": True,
         "automatic_context_delivery": "caller_controlled"
         if host == "generic"

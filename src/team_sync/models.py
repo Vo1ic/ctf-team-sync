@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
@@ -72,6 +73,7 @@ class Actor(Scoped, Base):
     owner_id: Mapped[str | None] = mapped_column(String(36))
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     capabilities: Mapped[list] = mapped_column(JSON, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Challenge(Scoped, Base):
@@ -88,7 +90,16 @@ class Task(Scoped, Base):
         "tasks",
         reference("challenge_id", "challenges"),
         reference("assignee_id", "actors"),
+        reference("created_by_id", "actors"),
+        reference("requested_assignee_id", "actors"),
+        reference("artifact_id", "artifacts"),
+        reference("approved_by_id", "actors"),
         CheckConstraint("status IN ('open','running','done')"),
+        CheckConstraint("kind IN ('work','artifact_review')", name="task_kind"),
+        CheckConstraint(
+            "approval_status IN ('not_required','pending','approved','declined')",
+            name="task_approval",
+        ),
     )
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
@@ -98,6 +109,16 @@ class Task(Scoped, Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, default=1)
     result: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[str | None] = mapped_column(String(36))
+    requested_assignee_id: Mapped[str | None] = mapped_column(String(36))
+    artifact_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(24), default="work", server_default="work")
+    approval_status: Mapped[str] = mapped_column(
+        String(24), default="not_required", server_default="not_required"
+    )
+    approved_by_id: Mapped[str | None] = mapped_column(String(36))
+    approval_note: Mapped[str | None] = mapped_column(Text)
+    analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Finding(Scoped, Base):
@@ -107,6 +128,7 @@ class Finding(Scoped, Base):
         reference("challenge_id", "challenges"),
         reference("task_id", "tasks"),
         reference("author_id", "actors"),
+        reference("artifact_id", "artifacts"),
     )
     title: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
@@ -115,6 +137,7 @@ class Finding(Scoped, Base):
     challenge_id: Mapped[str | None] = mapped_column(String(36))
     task_id: Mapped[str | None] = mapped_column(String(36))
     author_id: Mapped[str] = mapped_column(String(36))
+    artifact_id: Mapped[str | None] = mapped_column(String(36))
 
 
 class Flag(Scoped, Base):
@@ -174,10 +197,25 @@ class Message(Scoped, Base):
         "messages",
         reference("sender_id", "actors"),
         reference("recipient_id", "actors"),
+        reference("task_id", "tasks"),
+        reference("reply_to_id", "messages"),
+        CheckConstraint(
+            "kind IN ('note','question','assignment','status','approval','result')",
+            name="message_kind",
+        ),
+        CheckConstraint("priority IN ('normal','urgent')", name="message_priority"),
     )
     sender_id: Mapped[str] = mapped_column(String(36))
     recipient_id: Mapped[str | None] = mapped_column(String(36))
     body: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(24), default="note", server_default="note")
+    priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal")
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    group_key: Mapped[str | None] = mapped_column(String(128))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reply_to_id: Mapped[str | None] = mapped_column(String(36))
+    fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
+    duplicate_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class Receipt(Base):
@@ -196,16 +234,48 @@ class Receipt(Base):
 
 class Artifact(Scoped, Base):
     __tablename__ = "artifacts"
-    __table_args__ = scoped_constraints("artifacts", reference("author_id", "actors"))
+    __table_args__ = scoped_constraints(
+        "artifacts", reference("author_id", "actors"), reference("archived_by_id", "actors")
+    )
     name: Mapped[str] = mapped_column(String(255))
     sha256: Mapped[str] = mapped_column(String(64))
     size: Mapped[int] = mapped_column(BigInteger)
     author_id: Mapped[str] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    media_type: Mapped[str] = mapped_column(
+        String(120), default="application/octet-stream", server_default="application/octet-stream"
+    )
+    requires_review: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    archive_reason: Mapped[str | None] = mapped_column(Text)
+    archived_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class Activity(Scoped, Base):
+    __tablename__ = "activities"
+    __table_args__ = scoped_constraints(
+        "activities",
+        reference("actor_id", "actors"),
+        reference("task_id", "tasks"),
+        UniqueConstraint("project_id", "actor_id"),
+        CheckConstraint(
+            "state IN ('idle','working','waiting_human','blocked','ready')", name="activity_state"
+        ),
+    )
+    actor_id: Mapped[str] = mapped_column(String(36))
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    state: Mapped[str] = mapped_column(String(24))
+    detail: Mapped[str] = mapped_column(String(300), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Event(Base):
     __tablename__ = "events"
-    __table_args__ = (reference("actor_id", "actors"),)
+    __table_args__ = (
+        reference("actor_id", "actors"),
+        Index("ix_events_actor_time", "project_id", "actor_id", "created_at"),
+    )
     project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     seq: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     id: Mapped[str] = mapped_column(String(36), unique=True, default=new_id)
