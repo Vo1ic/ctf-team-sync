@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 from typing import get_args
 
 from sqlalchemy import and_, case, func, or_, select
@@ -9,6 +10,7 @@ from sqlalchemy import and_, case, func, or_, select
 from team_sync import models as m
 from team_sync.core import record
 from team_sync.editing import receipt_stage
+from team_sync.onboarding import participants
 from team_sync.schemas import AgentAction, AttentionQuery
 from team_sync.workflows import actor_records
 
@@ -25,6 +27,7 @@ MODELS = {
     "messages": m.Message,
     "activities": m.Activity,
     "logs": m.Log,
+    "links": m.Link,
 }
 
 
@@ -40,7 +43,16 @@ def operations(role, kind):
     ]
 
 
+SIGNED_URL = re.compile(r"([?&](?:token|signature|sig|key|access_token)=)[^&\s\"')]+", re.I)
+
+
+def redact(value):
+    """Hide signed download parameters in excerpts; full resources keep the original."""
+    return SIGNED_URL.sub(r"\1<redacted>", value) if isinstance(value, str) else value
+
+
 def clip(value, size=180):
+    value = redact(value)
     return value[:size] + "…" if value and len(value) > size else value
 
 
@@ -91,9 +103,47 @@ def brief(item, timestamp=None):
             else 0
         )
         value["lease_remaining_seconds"] = remaining
-        value["can_claim"] = item.status != "done" and remaining == 0
+        value["lease_expired"] = item.status == "running" and remaining == 0
+        if item.status == "running" and 0 < remaining <= 120:
+            value["lease_expires_soon"] = True
+        value["can_claim"] = item.status not in {"done", "review"} and remaining == 0
+    if "source_url" in value:
+        value["source_url"] = redact(value["source_url"])
     value["resource"] = f"{item.__tablename__}/{item.id}"
     return value
+
+
+MINIMAL_FIELDS = (
+    "id",
+    "title",
+    "name",
+    "status",
+    "version",
+    "kind",
+    "assignee_id",
+    "author_id",
+    "challenge_id",
+    "task_id",
+    "verification_status",
+    "priority",
+    "lease_remaining_seconds",
+    "lease_expired",
+    "available_actions",
+    "participants",
+    "ack_stage",
+    "resource",
+)
+
+
+def minimal(value):
+    """The smallest still-actionable item: identity, state and version, no long text."""
+    result = {key: value[key] for key in MINIMAL_FIELDS if key in value and value[key] is not None}
+    for key in ("title", "name"):
+        if isinstance(result.get(key), str):
+            result[key] = clip(result[key], 80)
+    if isinstance(result.get("participants"), list):
+        result["participants"] = [entry["name"] for entry in result["participants"]][:6]
+    return result
 
 
 def page(db, stmt, render, limit=5, offset=0):
@@ -120,6 +170,8 @@ def messages(project, actor):
         .where(
             m.Message.project_id == project.id,
             or_(m.Message.recipient_id == actor.id, m.Message.recipient_id.is_(None)),
+            # Your own broadcasts live in the outbox, not in your inbox.
+            m.Message.sender_id != actor.id,
         )
     )
 
@@ -166,6 +218,9 @@ def workspace(core, db, project, actor, query):
             item = row[0]
             value = brief(item, timestamp)
             if isinstance(item, m.Task):
+                joined = participants(db, project.id, [item.id]).get(item.id)
+                if joined:
+                    value["participants"] = joined
                 actions = []
                 if actor.role != "observer":
                     if (
@@ -184,6 +239,9 @@ def workspace(core, db, project, actor, query):
                                 if item.analysis_started_at
                                 else "artifact.review.start"
                             )
+                if actor.role != "observer" and item.status != "done":
+                    mine = any(entry["actor_id"] == actor.id for entry in joined or [])
+                    actions.append("leave" if mine else "join")
                 value["available_actions"] = actions
                 value["can_claim"] = "claim" in actions
             return value
@@ -207,8 +265,22 @@ def workspace(core, db, project, actor, query):
     findings = scoped(m.Finding)
     if query.task_id:
         findings = findings.where(m.Finding.task_id == query.task_id)
+    team_ids = [actor.id] + ([actor.owner_id] if actor.owner_id else [])
+    joined = scoped(m.Task).where(
+        m.Task.status != "done",
+        or_(
+            m.Task.assignee_id.is_(None), m.Task.assignee_id != actor.id, m.Task.status != "running"
+        ),
+        m.Task.id.in_(
+            select(m.TaskParticipant.task_id).where(
+                m.TaskParticipant.project_id == project.id,
+                m.TaskParticipant.actor_id.in_(team_ids),
+            )
+        ),
+    )
     content = {
         "my_tasks": section(own.order_by(m.Task.lease_until, m.Task.id)),
+        "joined_tasks": section(joined.order_by(m.Task.created_at, m.Task.id)),
         "messages": pending,
         "available_tasks": section(
             scoped(m.Task)
@@ -224,6 +296,9 @@ def workspace(core, db, project, actor, query):
                 m.Task.created_at,
                 m.Task.id,
             )
+        ),
+        "in_review": section(
+            scoped(m.Task).where(m.Task.status == "review").order_by(m.Task.created_at, m.Task.id)
         ),
         "team_tasks": section(
             scoped(m.Task)
@@ -251,12 +326,23 @@ def workspace(core, db, project, actor, query):
             .order_by(m.Artifact.created_at.desc(), m.Artifact.id)
         ),
     }
+    if challenge_id:
+        # Known traps for this challenge: do not fall for them again.
+        content["known_decoys"] = section(
+            scoped(m.Finding)
+            .where(m.Finding.kind == "decoy")
+            .order_by(m.Finding.created_at, m.Finding.id)
+        )
     if project.capabilities.get("flags"):
         content["flags_to_review"] = section(
             scoped(m.Flag)
             .where(m.Flag.verification_status == "unverified")
             .order_by(m.Flag.created_at, m.Flag.id)
         )
+    owner = core.get(db, m.Actor, project.id, actor.owner_id) if actor.owner_id else None
+    me = brief(actor)
+    if owner:
+        me["owner_name"] = owner.name
     result = {
         "schema_version": 1,
         "server_time": timestamp.isoformat(),
@@ -265,9 +351,10 @@ def workspace(core, db, project, actor, query):
             "name": clip(project.name, 120),
             "rules": clip(project.rules, 600),
             "rules_truncated": len(project.rules) > 600,
+            "briefing": "Read CTF.md with get_briefing before your first task (no hints!).",
             "capabilities": project.capabilities,
         },
-        "self": brief(actor),
+        "self": me,
         "events_after": project.event_seq,
         "scope": {"challenge_id": challenge_id, "task_id": query.task_id},
         "allowed_operations": operations(actor.role, actor.kind),
@@ -299,14 +386,42 @@ def workspace(core, db, project, actor, query):
             "Read does not acknowledge. Use get_attention; mark processed after acting. "
             "Retry uncertain commands with same key. Page has_more; cursor is not an ack.",
         ]
+
+    def oversize():
+        return len(json.dumps(result, ensure_ascii=False, indent=2)) > query.max_chars
+
+    hints = {
+        "my_tasks": "get_resource(tasks, id)",
+        "in_review": "list_items(tasks)",
+        "known_decoys": "get_dossier(challenge_id)",
+        "joined_tasks": "list_items(tasks)",
+        "messages": "get_attention",
+        "available_tasks": "list_items(tasks)",
+        "team_tasks": "list_items(tasks)",
+        "recent_findings": "search or get_resource(challenges/tasks, id)",
+        "sent_messages": "outbox",
+        "artifacts": "list_items(artifacts)",
+        "flags_to_review": "list_items(flags)",
+    }
+    # 1) Shrink items to identity/state/version before dropping any of them.
     for name in reversed(content):
-        while (
-            content[name]["items"]
-            and len(json.dumps(result, ensure_ascii=False, indent=2)) > query.max_chars
-        ):
-            content[name]["items"].pop()
-            content[name]["has_more"] = True
+        if not oversize():
+            break
+        if content[name]["items"]:
+            content[name]["items"] = [minimal(item) for item in content[name]["items"]]
             result["truncated"] = True
+    # 2) Drop items from the least important sections, keeping one per non-empty section.
+    for keep in (1, 0):
+        for name in reversed(content):
+            while len(content[name]["items"]) > keep and oversize():
+                content[name]["items"].pop()
+                content[name]["has_more"] = True
+                result["truncated"] = True
+    for name, section_value in content.items():
+        shown = len(section_value["items"])
+        if section_value.get("total", 0) > shown:
+            section_value["omitted"] = section_value["total"] - shown
+            section_value["more"] = hints.get(name, "list_items")
     # Arbitrary project capability names can be large; do not let them defeat the budget.
     if len(json.dumps(result, ensure_ascii=False, indent=2)) > query.max_chars:
         result["project"]["capabilities"] = {"flags": bool(project.capabilities.get("flags"))}
@@ -356,8 +471,13 @@ def resource(core, db, project, actor, collection, resource_id, offset=0, limit=
             offset,
         )
 
+    if collection in {"challenges", "tasks", "findings", "flags", "artifacts"}:
+        # Knowledge-graph edges in both directions (chains, refutations, attachments).
+        add("links", or_(m.Link.source_id == item.id, m.Link.target_id == item.id))
     if collection == "tasks":
         add("findings", m.Finding.task_id == item.id)
+        add("flags", m.Flag.task_id == item.id)
+        value["participants"] = participants(db, project.id, [item.id]).get(item.id, [])
     if collection == "artifacts":
         add("tasks", m.Task.artifact_id == item.id)
         add("findings", m.Finding.artifact_id == item.id)
@@ -388,7 +508,11 @@ def search(db, project, actor, query):
         if query.collection
         else ["challenges", "tasks", "findings", "artifacts", "messages", "flags"]
     )
-    escaped = query.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    tokens = [
+        token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        for token in re.split(r"[\s,;:!?()\[\]{}\"'«»]+", query.query)
+        if token.strip(".-")
+    ][:8] or [query.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")]
     for name in names:
         model = MODELS[name]
         fields = [
@@ -405,11 +529,28 @@ def search(db, project, actor, query):
             )
             if hasattr(model, field)
         ]
+        if hasattr(model, "category"):
+            fields.append(model.category)
+        # Findings/flags/tasks are found by the title of the challenge or task they belong to.
+        for column, parent in (("challenge_id", m.Challenge), ("task_id", m.Task)):
+            if hasattr(model, column) and model is not parent:
+                fields.append(
+                    select(parent.title)
+                    .where(
+                        parent.project_id == model.project_id,
+                        parent.id == getattr(model, column),
+                    )
+                    .scalar_subquery()
+                )
         if not fields:
             continue
+        # Every word must match some field: "Clipboard Heist Pt. 2" finds the challenge.
         stmt = select(model).where(
             (model.id == project.id) if model is m.Project else (model.project_id == project.id),
-            or_(*(field.ilike(f"%{escaped}%", escape="\\") for field in fields)),
+            *(
+                or_(*(field.ilike(f"%{token}%", escape="\\") for field in fields))
+                for token in tokens
+            ),
         )
         if model is m.Message:
             stmt = stmt.where(
@@ -428,5 +569,7 @@ def search(db, project, actor, query):
         "items": found[query.offset : query.offset + query.limit],
         "total": total,
         "has_more": query.offset + query.limit < total,
+        "searched_collections": names,
+        "matching": "every word must appear in the record text or its challenge/task title",
         "events_after": project.event_seq,
     }

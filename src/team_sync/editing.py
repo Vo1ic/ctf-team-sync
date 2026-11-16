@@ -23,6 +23,7 @@ MODELS = {
         ("artifacts", m.Artifact),
         ("activities", m.Activity),
         ("logs", m.Log),
+        ("hint_requests", m.HintRequest),
     ]
 }
 FIELDS = {
@@ -318,6 +319,17 @@ class EditingOperations:
             )
         if changes.get("status", item.status) == "done" and not changes.get("result", item.result):
             fail(422, "result_required", "A completed task requires a result")
+        if (
+            changes.get("status") == "done"
+            and (actor.role not in {"owner", "coordinator"} or actor.kind != "human")
+            and self.needs_flag(project, item)
+            and not self.confirmed_flag(db, project.id, item.challenge_id)
+        ):
+            fail(
+                403,
+                "flag_confirmation_required",
+                "A challenge task is done only after a human confirms its flag",
+            )
         if "challenge_id" in changes:
             if changes["challenge_id"]:
                 self.get(db, m.Challenge, project.id, changes["challenge_id"])

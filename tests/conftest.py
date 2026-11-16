@@ -1,8 +1,12 @@
 import os
+import socket
+import time
 from pathlib import Path
+from threading import Thread
 from uuid import uuid4
 
 import pytest
+import uvicorn
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -87,3 +91,30 @@ def execute(client, project, operation, arguments=None, resource_id=None, token=
 @pytest.fixture
 def project(client):
     return initialize(client)
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(tmp_path, monkeypatch):
+    # Identity pools and process locks of spawned MCP bridges stay inside the test.
+    monkeypatch.setenv("TEAM_SYNC_STATE_DIR", str(tmp_path / "team-sync-state"))
+
+
+@pytest.fixture
+def live_server(app):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
+    thread = Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started:
+            if not thread.is_alive() or time.monotonic() > deadline:
+                raise RuntimeError("HTTP server did not start")
+            time.sleep(0.01)
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+        listener.close()

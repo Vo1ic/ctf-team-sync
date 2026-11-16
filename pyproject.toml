@@ -1,6 +1,6 @@
 [project]
 name = "ctf-team-sync"
-version = "0.5.0"
+version = "0.9.0"
 description = "Shared coordination for CTF teams and heterogeneous AI agents"
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,6 +24,7 @@ Issues = "https://github.com/Vo1ic/ctf-team-sync/issues"
 team-sync-mcp = "team_sync.mcp:main"
 team-sync-contracts = "team_sync.contracts:main"
 team-sync-agent = "team_sync.agent:main"
+team-sync-runner = "team_sync.runner:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

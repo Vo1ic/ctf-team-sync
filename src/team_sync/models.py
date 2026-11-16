@@ -39,6 +39,7 @@ class Project(Base):
     event_seq: Mapped[int] = mapped_column(BigInteger, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    briefing: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class Scoped:
@@ -87,6 +88,7 @@ class Challenge(Scoped, Base):
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     points: Mapped[int | None] = mapped_column(Integer)
     source_url: Mapped[str | None] = mapped_column(String(2048))
+    writeup: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class Task(Scoped, Base):
@@ -99,8 +101,9 @@ class Task(Scoped, Base):
         reference("requested_assignee_id", "actors"),
         reference("artifact_id", "artifacts"),
         reference("approved_by_id", "actors"),
-        CheckConstraint("status IN ('open','running','done')"),
-        CheckConstraint("kind IN ('work','artifact_review')", name="task_kind"),
+        reference("parent_id", "tasks"),
+        CheckConstraint("status IN ('open','running','review','done')", name="task_status"),
+        CheckConstraint("kind IN ('work','artifact_review','question')", name="task_kind"),
         CheckConstraint("priority IN ('low','normal','urgent')", name="task_priority"),
         CheckConstraint(
             "approval_status IN ('not_required','pending','approved','declined')",
@@ -127,6 +130,9 @@ class Task(Scoped, Base):
     analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     priority: Mapped[str] = mapped_column(String(16), default="normal", server_default="normal")
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Questions to expert agents: the skills they need and the work they came from.
+    tags: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    parent_id: Mapped[str | None] = mapped_column(String(36))
 
 
 class Log(Scoped, Base):
@@ -154,6 +160,9 @@ class Finding(Scoped, Base):
         reference("task_id", "tasks"),
         reference("author_id", "actors"),
         reference("artifact_id", "artifacts"),
+        CheckConstraint(
+            "status IS NULL OR status IN ('open','confirmed','refuted')", name="finding_status"
+        ),
     )
     title: Mapped[str] = mapped_column(String(200))
     body: Mapped[str] = mapped_column(Text)
@@ -164,6 +173,8 @@ class Finding(Scoped, Base):
     author_id: Mapped[str] = mapped_column(String(36))
     artifact_id: Mapped[str | None] = mapped_column(String(36))
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # Hypothesis lifecycle: open -> confirmed | refuted. Other kinds keep NULL.
+    status: Mapped[str | None] = mapped_column(String(16))
 
 
 class Flag(Scoped, Base):
@@ -172,6 +183,7 @@ class Flag(Scoped, Base):
         "flags",
         reference("challenge_id", "challenges"),
         reference("author_id", "actors"),
+        reference("task_id", "tasks"),
         UniqueConstraint("project_id", "scope_hash"),
         CheckConstraint("verification_status IN ('unverified','confirmed','rejected')"),
     )
@@ -185,6 +197,7 @@ class Flag(Scoped, Base):
     verification_status: Mapped[str] = mapped_column(String(16), default="unverified")
     verification: Mapped[dict | None] = mapped_column(JSON)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    task_id: Mapped[str | None] = mapped_column(String(36))
 
 
 class Verification(Scoped, Base):
@@ -308,6 +321,123 @@ class Activity(Scoped, Base):
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
+class TaskParticipant(Base):
+    """Cooperative work on a task without taking its single lease from the assignee."""
+
+    __tablename__ = "task_participants"
+    __table_args__ = (
+        reference("task_id", "tasks"),
+        reference("actor_id", "actors"),
+        reference("added_by_id", "actors"),
+    )
+    project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    added_by_id: Mapped[str] = mapped_column(String(36))
+    note: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+LINK_NODES = {
+    "challenge": "challenges",
+    "task": "tasks",
+    "finding": "findings",
+    "flag": "flags",
+    "artifact": "artifacts",
+}
+LINK_RELATIONS = ("attached_to", "leads_to", "supports", "refutes", "supersedes")
+
+
+class Link(Scoped, Base):
+    """A typed edge of the team's knowledge graph (hypothesis chains, attachments)."""
+
+    __tablename__ = "links"
+    __table_args__ = scoped_constraints(
+        "links",
+        reference("author_id", "actors"),
+        *(
+            reference(f"{side}_{node}_id", table)
+            for side in ("source", "target")
+            for node, table in LINK_NODES.items()
+        ),
+        *(
+            CheckConstraint(
+                f"{side}_type != '{node}' OR {side}_{node}_id = {side}_id",
+                name=f"link_{side}_{node}",
+            )
+            for side in ("source", "target")
+            for node in LINK_NODES
+        ),
+        CheckConstraint("relation IN ('" + "','".join(LINK_RELATIONS) + "')", name="link_relation"),
+        CheckConstraint("source_id != target_id", name="link_not_self"),
+        UniqueConstraint("project_id", "source_id", "target_id", "relation"),
+    )
+    author_id: Mapped[str] = mapped_column(String(36))
+    relation: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    source_type: Mapped[str] = mapped_column(String(16))
+    source_id: Mapped[str] = mapped_column(String(36))
+    target_type: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[str] = mapped_column(String(36))
+    source_challenge_id: Mapped[str | None] = mapped_column(String(36))
+    source_task_id: Mapped[str | None] = mapped_column(String(36))
+    source_finding_id: Mapped[str | None] = mapped_column(String(36))
+    source_flag_id: Mapped[str | None] = mapped_column(String(36))
+    source_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    target_challenge_id: Mapped[str | None] = mapped_column(String(36))
+    target_task_id: Mapped[str | None] = mapped_column(String(36))
+    target_finding_id: Mapped[str | None] = mapped_column(String(36))
+    target_flag_id: Mapped[str | None] = mapped_column(String(36))
+    target_artifact_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class HintRequest(Scoped, Base):
+    """A paid platform hint needs a human decision before anyone unlocks it."""
+
+    __tablename__ = "hint_requests"
+    __table_args__ = scoped_constraints(
+        "hint_requests",
+        reference("challenge_id", "challenges"),
+        reference("task_id", "tasks"),
+        reference("requester_id", "actors"),
+        reference("decided_by_id", "actors"),
+        reference("finding_id", "findings"),
+        CheckConstraint("status IN ('pending','approved','declined','used')", name="hint_status"),
+    )
+    challenge_id: Mapped[str] = mapped_column(String(36))
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    requester_id: Mapped[str] = mapped_column(String(36))
+    hint_ref: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    cost: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    decided_by_id: Mapped[str | None] = mapped_column(String(36))
+    decision_note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finding_id: Mapped[str | None] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
+class Invite(Scoped, Base):
+    """A narrow, expiring credential that can only create a teammate and their agent."""
+
+    __tablename__ = "invites"
+    __table_args__ = scoped_constraints(
+        "invites",
+        reference("created_by_id", "actors"),
+        CheckConstraint("role IN ('coordinator','worker','observer')", name="invite_role"),
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by_id: Mapped[str] = mapped_column(String(36))
+    label: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    role: Mapped[str] = mapped_column(String(16), default="worker", server_default="worker")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    max_uses: Mapped[int] = mapped_column(Integer, default=10, server_default="10")
+    uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
 REVISION_TARGETS = {
     "actors": "target_actor_id",
     "challenges": "challenge_id",
@@ -387,3 +517,63 @@ class Command(Base):
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     fingerprint: Mapped[str] = mapped_column(String(64))
     response: Mapped[dict] = mapped_column(JSON)
+
+
+RUN_STATES = ("requested", "approved", "declined", "running", "finished", "failed", "cancelled")
+ACTIVE_RUN_STATES = ("requested", "approved", "running")
+
+
+class Runner(Scoped, Base):
+    """A machine of a human that can start agents from profiles defined locally on it.
+
+    The server never stores commands: a runner advertises profile names and limits, and
+    can only be asked to start one of them.
+    """
+
+    __tablename__ = "runners"
+    __table_args__ = scoped_constraints(
+        "runners",
+        reference("owner_id", "actors"),
+        UniqueConstraint("project_id", "owner_id", "name", name="runner_name"),
+    )
+    owner_id: Mapped[str] = mapped_column(String(36))
+    name: Mapped[str] = mapped_column(String(100))
+    profiles: Mapped[list] = mapped_column(JSON, default=list)
+    info: Mapped[dict] = mapped_column(JSON, default=dict)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
+class Run(Scoped, Base):
+    """One start of a runner profile; another participant's request needs the runner owner."""
+
+    __tablename__ = "runs"
+    __table_args__ = scoped_constraints(
+        "runs",
+        reference("runner_id", "runners"),
+        reference("task_id", "tasks"),
+        reference("requested_by_id", "actors"),
+        reference("decided_by_id", "actors"),
+        CheckConstraint("status IN ('" + "','".join(RUN_STATES) + "')", name="run_status"),
+        CheckConstraint(
+            "purpose IN ('task','question','coordinator','manual')", name="run_purpose"
+        ),
+        Index("ix_runs_active", "project_id", "status"),
+    )
+    runner_id: Mapped[str] = mapped_column(String(36))
+    profile: Mapped[str] = mapped_column(String(64))
+    purpose: Mapped[str] = mapped_column(String(16), default="manual")
+    task_id: Mapped[str | None] = mapped_column(String(36))
+    requested_by_id: Mapped[str] = mapped_column(String(36))
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(16), default="requested")
+    decided_by_id: Mapped[str | None] = mapped_column(String(36))
+    decision_note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    output_tail: Mapped[str] = mapped_column(Text, default="", server_default="")
+    agent_name: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")

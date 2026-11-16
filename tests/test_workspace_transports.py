@@ -12,7 +12,6 @@ from team_sync.jsonl_bridge import JSONLBridge
 
 from .conftest import enroll, execute
 from .test_human_workflows import upload
-from .test_transports import live_server as live_server
 
 
 def test_native_mcp_edit_is_visible_through_jsonl_history(client, project, live_server, tmp_path):

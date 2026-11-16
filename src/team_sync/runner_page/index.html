@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Team Sync runner</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --fg: #16181d;
+        --muted: #5d6470;
+        --card: #fff;
+        --line: #dfe3ea;
+        --red: #b42318;
+        --amber: #a15c07;
+        --green: #067647;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121417;
+          --fg: #e8eaee;
+          --muted: #9aa3b2;
+          --card: #1b1e23;
+          --line: #2c313a;
+          --red: #f97066;
+          --amber: #fdb022;
+          --green: #47cd89;
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 20px 16px;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin: 12px 0;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 15px;
+        margin: 0 0 8px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+        max-height: 180px;
+        overflow: auto;
+        background: var(--bg);
+        padding: 8px;
+        border-radius: 6px;
+      }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        border-radius: 7px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button.danger {
+        background: var(--red);
+        color: #fff;
+        border-color: var(--red);
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .badge {
+        font-size: 12px;
+        padding: 1px 8px;
+        border-radius: 99px;
+        border: 1px solid var(--line);
+      }
+      .err {
+        color: var(--red);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Runner</h1>
+      <p class="muted" id="sub"></p>
+      <div class="row">
+        <button id="pause"></button
+        ><button class="danger" id="stopall">Зупинити всіх агентів</button>
+      </div>
+      <p class="err" id="error"></p>
+      <section>
+        <h2>Чекають локального підтвердження</h2>
+        <div id="awaiting"></div>
+      </section>
+      <section>
+        <h2>Працюють зараз</h2>
+        <div id="running"></div>
+      </section>
+      <section>
+        <h2>Профілі</h2>
+        <div id="profiles"></div>
+      </section>
+      <section>
+        <h2>Останні запуски</h2>
+        <div id="history"></div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

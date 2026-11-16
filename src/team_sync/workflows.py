@@ -197,7 +197,7 @@ class WorkflowOperations:
         if actor.role not in {"owner", "coordinator"} and task.created_by_id != actor.id:
             fail(403, "forbidden", "Only the creator or coordinator may change the recipient")
         timestamp = db.scalar(select(func.clock_timestamp()))
-        if task.status == "done" or (
+        if task.status in {"done", "review"} or (
             task.status == "running" and task.lease_until and task.lease_until > timestamp
         ):
             fail(409, "task_in_progress", "Release a live task before changing its recipient")

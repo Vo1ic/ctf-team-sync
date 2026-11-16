@@ -179,7 +179,10 @@ def test_resource_details_and_search_respect_private_messages_and_literal_query(
         ]["id"]
         == task["id"]
     )
-    assert get(client, project, "search", query="need_%").json()["total"] == 1
+    literal = get(client, project, "search", query="need_%").json()
+    # The task itself plus its three findings (matched through their task title).
+    assert literal["total"] == 4
+    assert all("wildcard" not in item["item"].get("title", "") for item in literal["items"])
     assert (
         get(client, project, "search", query="needle", offset=2, limit=1).json()["has_more"]
         is False

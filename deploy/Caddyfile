@@ -1,0 +1,13 @@
+{$TEAM_SYNC_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+	}
+	reverse_proxy server:8000 {
+		# Long polling and SSE must not be buffered.
+		flush_interval -1
+		transport http {
+			read_timeout 60s
+		}
+	}
+}

@@ -78,6 +78,8 @@ def attention(db, project, actor, query):
     visible = select(m.Message).where(
         m.Message.project_id == project.id,
         or_(m.Message.recipient_id == actor.id, m.Message.recipient_id.is_(None)),
+        # Your own broadcasts live in the outbox, not in your inbox.
+        m.Message.sender_id != actor.id,
     )
     # A different human may decide, or the agent may release the task. The original
     # approval request then stops needing attention without inventing a processed receipt.
