@@ -42,9 +42,17 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | task.create | не потрібен | title, description?, challenge_id?, requested_assignee_id? |
 | task.claim | task | expected_version, lease_seconds? |
 | task.renew | task | expected_version, lease_seconds? |
-| task.complete | task | expected_version, result |
+| task.complete | task | expected_version, result, without_flag? — challenge task → `review` до підтвердження флага |
 | task.release | task | expected_version, reason |
 | task.assign | task | expected_version, recipient_id? (null = будь-хто) |
+| task.join | task | actor_id?, note? — учасник без lease (0.6) |
+| task.leave | task | actor_id? |
+| task.join_many | не потрібен | category? або challenge_id?, actor_id?, note? |
+| link.create | не потрібен | source_type, source_id, target_type, target_id, relation, note? (0.7) |
+| link.delete | link | — (автор або координатор) |
+| hint.request | не потрібен | task_id? або challenge_id?, reason, hint_ref?, cost? (потрібна власна знахідка) |
+| hint.decide | hint_request | expected_version, decision approved/declined, note? — лише людина-координатор |
+| hint.used | hint_request | expected_version, content — текст підказки стає знахідкою |
 | actor.rename | actor | expected_version, name |
 | activity.report | не потрібен | state, detail?, task_id?, ttl_seconds? |
 | artifact.review.request | artifact | recipient_id? (для агента default self) |
@@ -52,9 +60,9 @@ HTTP prefix: `/api/v1`. Усі проєктні запити передають
 | artifact.review.start | task | expected_version |
 | artifact.review.complete | task | expected_version, readme, verdict?, reason? |
 | artifact.archive | artifact | expected_version, archived, reason; пряме рішення людини |
-| finding.create | не потрібен | title, body, evidence, kind?, challenge_id?, task_id?, artifact_id? |
-| flag.create | не потрібен | value, challenge_id?, target?, round?, expires_at? |
-| flag.verify | flag | expected_version, status, method, evidence |
+| finding.create | не потрібен | title, body, evidence, kind?, challenge_id?, task_id?, artifact_id?, status?, based_on[]?, refutes[]? |
+| flag.create | не потрібен | value, task_id?, challenge_id? (з task), target?, round?, expires_at? |
+| flag.verify | flag | expected_version, status, method? (manual), evidence? |
 | submission.create | flag | outcome, evidence |
 | message.send | не потрібен | body, recipient_id?, kind?, priority?, task_id?, group_key?, expires_at?, reply_to_id?, deduplicate? |
 | message.ack | message | stage, expected_version? (обов'язково для редакцій >1) |
@@ -180,3 +188,54 @@ collection, event_type (точний), level, query (literal-пошук текс
 типів дій), include_routine=false. Наступна сторінка: before=next_before;
 limit 1–100, max_chars 4000–32000. Нові події не зсувають сторінки історії.
 Уривки логів мають body_truncated; event payload лишається metadata-only.
+
+## Онбординг, CTF.md і кооп (0.6.0)
+
+- `POST /projects/{project}/invites` (owner/coordinator): `label?`, `role`
+  (worker/coordinator/observer), `expires_in_hours` 1–720, `max_uses` 1–100 →
+  `{invite, token}`; `GET .../invites`, `POST .../invites/{id}/revoke`.
+- `POST /join` з `Authorization: Bearer <invite>`: `human_name`, `agent_name?`,
+  `capabilities?`, `create_agent=true` → `{project, human:{actor,token},
+  agent:{actor,token}|null, briefing}`. 401 `invalid_invite`, 409 `invite_exhausted`.
+- `POST /projects/{project}/actors`: owner — будь-які доступи; worker/coordinator —
+  лише `kind=agent, role=worker` для своєї людини (агент — для свого власника).
+  Відповідь містить `briefing`. Ім'я агента: `<Людина>-<Позивний>_<4>`.
+- `GET /projects/{project}/me` — identity; `GET .../ctf.md` (text/markdown) і
+  `GET .../briefing` — CTF.md; `GET .../participants` — учасники робіт.
+- `GET /health` → `{"status":"ok","service":"ctf-team-sync","version":...}`.
+- Помилки можуть мати машинні поля: `current_version`, `resource_id` (409
+  `version_conflict`), `existing_id` (409 `duplicate_flag`/`duplicate_challenge`/
+  `duplicate_task`). Створення challenge або незавершеної task з такою самою назвою
+  дає 409, якщо не передати `allow_duplicate: true`.
+- `search`: усі слова запиту мають знайтися (у будь-якому полі або в назві
+  пов'язаного challenge/task); відповідь містить `searched_collections`.
+- `agent-context`: секція з `total > 0` завжди має хоча б один (мінімальний)
+  елемент; `omitted` і `more` підказують, як дочитати. Нова секція `joined_tasks`.
+  Параметри підписаних URL (`token=` тощо) приховані в уривках, але не в
+  `resources/{collection}/{id}`.
+
+## Граф знань, гіпотези та досьє (0.7.0)
+
+- `links` — типізовані ребра: `attached_to` (artifact → challenge/task/finding),
+  `leads_to` (finding/task → finding/flag/task), `supports`, `supersedes`
+  (finding → finding), `refutes` (finding → finding/flag). Повтор того самого ребра
+  ідемпотентний; недопустима пара типів — 422 `invalid_link`.
+- `finding.status` для гіпотез: `open` (за замовчуванням) → `confirmed` | `refuted`.
+  `refutes` на гіпотезу робить її `refuted`, `supports` від `result` — `confirmed`;
+  зміна стану записується як звичайна ревізія.
+- `finding.create(based_on=[...], refutes=[...])` створює знахідку й ребра однією командою.
+- `challenge.writeup` — редагований Markdown-райтап (resource.update).
+- `GET /challenges/{id}/dossier` → `{challenge, markdown, graph:{nodes, edges}}`;
+  `GET /challenges/{id}/dossier.md` — те саме як text/markdown: райтап, умова, файли,
+  роботи, Mermaid-граф гіпотез, хід розв'язання з доказами й зв'язками, флаги.
+- `GET /collections/links`; `resources/{collection}/{id}` має `related.links`.
+
+## Підтверджене завершення, підказки, приманки (0.8.0)
+
+- Стан task `review`: робота завершена, але завдання не розв'язане, доки людина не
+  підтвердила флаг. `flag.verify(confirmed)` → `review` → `done` (подія `task.verified`);
+  відхилення останнього кандидата → `open` з номінацією попереднього виконавця
+  (`task.reopened`). `resource.update(status=done)` для такої task — лише координатор.
+- `kind="decoy"` для знахідок-приманок; `agent-context?challenge_id=` має `known_decoys`.
+- `GET /stalled?minutes=20` — роботи без прогресу або з заблокованим виконавцем.
+- `GET /collections/hint_requests`.
