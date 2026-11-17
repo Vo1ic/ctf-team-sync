@@ -7,7 +7,26 @@ from sqlalchemy import and_, case, exists, func, or_, select
 
 from team_sync import models as m
 from team_sync.domain import fail, record
-from team_sync.editing import MODELS
+from team_sync.editing import MODELS as EDITABLE
+
+# Events can point at records that are not editable (runners, runs, links).
+RUN_STATUS = {
+    "requested": "чекає рішення власника",
+    "approved": "дозволено",
+    "declined": "відхилено",
+    "running": "процес працює",
+    "finished": "процес завершився",
+    "failed": "помилка",
+    "cancelled": "скасовано",
+}
+RUN_PURPOSE = {
+    "question": "питання",
+    "coordinator": "координація",
+    "task": "робота",
+    "manual": "вручну",
+}
+
+MODELS = {**EDITABLE, "links": m.Link, "runners": m.Runner, "runs": m.Run}
 
 PREFIXES = {
     "project": "projects",
@@ -22,6 +41,10 @@ PREFIXES = {
     "artifact": "artifacts",
     "activity": "activities",
     "log": "logs",
+    "question": "tasks",
+    "run": "runs",
+    "runner": "runners",
+    "hint": "hint_requests",
 }
 ROUTINE = {"activity.update", "activity.report", "task.renew", "message.ack", "message.duplicate"}
 
@@ -118,8 +141,25 @@ class JournalOperations:
             if query.query:
                 escaped = query.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 text = f"%{escaped}%"
+                resource_id = m.Event.payload["resource_id"].as_string()
+                titled = [
+                    exists(
+                        select(model.id).where(
+                            model.project_id == project_id,
+                            model.id == resource_id,
+                            getattr(model, field).ilike(text, escape="\\"),
+                        )
+                    )
+                    for model, field in (
+                        (m.Task, "title"),
+                        (m.Challenge, "title"),
+                        (m.Finding, "title"),
+                        (m.Artifact, "name"),
+                    )
+                ]
                 stmt = stmt.where(
                     or_(
+                        *titled,
                         m.Event.type.ilike(text, escape="\\"),
                         exists(
                             select(m.Actor.id).where(
@@ -158,7 +198,9 @@ class JournalOperations:
                     groups.setdefault(name, set()).add(ident)
             resources = {}
             for name, ids in groups.items():
-                model = MODELS[name]
+                model = MODELS.get(name)
+                if model is None:
+                    continue
                 for item in db.scalars(
                     select(model).where(model.project_id == project_id, model.id.in_(ids))
                 ):
@@ -188,6 +230,13 @@ class JournalOperations:
                     label = "Запис журналу"
                 elif name == "flags":
                     label = "Флаг"
+                elif name == "runs" and item is not None:
+                    state = RUN_STATUS.get(event.payload.get("status") or item.status, item.status)
+                    label = (
+                        f"Запуск «{item.profile}» ({RUN_PURPOSE.get(item.purpose, '')}): {state}"
+                    )
+                    if item.agent_name:
+                        label += f" · {item.agent_name}"
                 entry = {
                     "id": event.id,
                     "seq": event.seq,

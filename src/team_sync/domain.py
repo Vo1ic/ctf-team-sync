@@ -5,13 +5,15 @@ from datetime import datetime
 
 
 class DomainError(Exception):
-    def __init__(self, status: int, code: str, detail: str):
+    def __init__(self, status: int, code: str, detail: str, **extra):
         self.status, self.code, self.detail = status, code, detail
+        # Machine-readable recovery data, e.g. current_version or existing_id.
+        self.extra = extra
         super().__init__(detail)
 
 
-def fail(status, code, detail):
-    raise DomainError(status, code, detail)
+def fail(status, code, detail, **extra):
+    raise DomainError(status, code, detail, **extra)
 
 
 def digest(value: str):

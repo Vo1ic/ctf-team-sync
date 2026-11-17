@@ -39,6 +39,10 @@ const paths = {
   clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 6v6l4 2",
   menu: "M4 6h16 M4 12h16 M4 18h16",
   shield: "m12 2 9 4v6c0 6-9 10-9 10S3 18 3 12V6z M8 12l3 3 5-6",
+  bot: "M12 8V4H8 M5 8h14v12H5z M2 14h3 M19 14h3 M9 13v2 M15 13v2",
+  bell: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10.3 21a1.94 1.94 0 0 0 3.4 0",
+  "bell-off":
+    "M6 8a6 6 0 0 1 9.3-5 M18 8c0 7 3 9 3 9H9 M10.3 21a1.94 1.94 0 0 0 3.4 0 M3 3l18 18",
 };
 
 export function icon(name) {
@@ -126,13 +130,30 @@ export function notify(message, error = false) {
   setTimeout(() => node.remove(), error ? 9000 : 4500);
 }
 
-export function modal(title, content, { wide = false, onClose } = {}) {
+// Called after a non-view dialog (a form or notice) closes, e.g. to return to the
+// detail view it was opened from.
+let restoreAfterDialog = null;
+export function onDialogClosed(callback) {
+  restoreAfterDialog = callback;
+}
+
+export function modal(
+  title,
+  content,
+  { wide = false, onClose, back = null, isView = false } = {},
+) {
   const dialog = document.querySelector("#modal");
   dialog.className = wide ? "wide" : "";
+  dialog.dataset.view = isView ? "1" : "";
   dialog.replaceChildren(
     el(
       "header",
       { class: "modal-header" },
+      back &&
+        button("← Назад", back, {
+          tone: "ghost small back-button",
+          title: "Назад (клавіша B)",
+        }),
       el("h2", { id: "modal-title" }, title),
       button("", () => dialog.close(), {
         tone: "icon-button",
@@ -146,6 +167,7 @@ export function modal(title, content, { wide = false, onClose } = {}) {
     if (dialog.open) return;
     dialog.replaceChildren();
     onClose?.();
+    if (!isView) restoreAfterDialog?.();
   };
   if (!dialog.open) dialog.showModal();
   dialog.scrollTop = 0;

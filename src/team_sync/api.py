@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from team_sync import roles
 from team_sync import schemas as s
 from team_sync.core import WRITE_ROLES, Core, DomainError
 from team_sync.settings import Settings
@@ -31,6 +32,10 @@ Collection = Literal[
     "artifacts",
     "activities",
     "logs",
+    "links",
+    "hint_requests",
+    "runners",
+    "runs",
 ]
 
 
@@ -71,7 +76,7 @@ def create_app(settings: Settings | None = None):
         yield
         core.engine.dispose()
 
-    app = FastAPI(title="CTF Team Sync", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="CTF Team Sync", version="0.9.0", lifespan=lifespan)
     app.state.core = core
 
     @app.middleware("http")
@@ -94,7 +99,7 @@ def create_app(settings: Settings | None = None):
     async def domain_error(request, exc):
         return JSONResponse(
             status_code=exc.status,
-            content={"code": exc.code, "detail": exc.detail},
+            content={"code": exc.code, "detail": exc.detail, **exc.extra},
             headers=(
                 {"WWW-Authenticate": "Bearer"}
                 if exc.status == 401
@@ -116,7 +121,98 @@ def create_app(settings: Settings | None = None):
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        # "service" lets clients tell this server apart from another app on the same port.
+        return {"status": "ok", "service": "ctf-team-sync", "version": app.version}
+
+    @app.post("/api/v1/join", status_code=201)
+    def join(data: s.JoinRequest, token: Token):
+        """Redeem an invite: creates the teammate (human) and their first agent."""
+        return core.join(token, data)
+
+    @app.post("/api/v1/projects/{project_id}/invites", status_code=201)
+    def create_invite(project_id: s.ID, data: s.InviteCreate, token: Token):
+        return core.create_invite(project_id, token, data)
+
+    @app.get("/api/v1/projects/{project_id}/invites")
+    def list_invites(project_id: s.ID, token: Token):
+        return {"items": core.invites(project_id, token)}
+
+    @app.post("/api/v1/projects/{project_id}/invites/{invite_id}/revoke")
+    def revoke_invite(project_id: s.ID, invite_id: s.ID, token: Token):
+        return core.revoke_invite(project_id, token, invite_id)
+
+    @app.get("/api/v1/projects/{project_id}/participants")
+    def task_participants(
+        project_id: s.ID,
+        token: Token,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=500)] = 500,
+    ):
+        return {"items": core.participant_rows(project_id, token, offset, limit)}
+
+    @app.get("/api/v1/projects/{project_id}/challenges/{challenge_id}/dossier")
+    def dossier(project_id: s.ID, challenge_id: s.ID, token: Token):
+        """Complete challenge documentation: Markdown writeup/history plus graph JSON."""
+        return core.dossier(project_id, token, challenge_id)
+
+    @app.get(
+        "/api/v1/projects/{project_id}/challenges/{challenge_id}/dossier.md",
+        response_class=PlainTextResponse,
+    )
+    def dossier_markdown(project_id: s.ID, challenge_id: s.ID, token: Token):
+        return PlainTextResponse(
+            core.dossier(project_id, token, challenge_id)["markdown"],
+            media_type="text/markdown; charset=utf-8",
+        )
+
+    @app.get("/api/v1/projects/{project_id}/stalled")
+    def stalled(project_id: s.ID, token: Token, minutes: Annotated[int, Query(ge=1, le=1440)] = 20):
+        """Running tasks without findings/logs for `minutes`, or with a blocked assignee."""
+        return core.stalled(project_id, token, minutes)
+
+    @app.get("/api/v1/roles")
+    def role_catalog():
+        """Agent roles; get the full instructions from /api/v1/roles/{role}."""
+        return roles.catalog()
+
+    @app.get("/api/v1/roles/{role}")
+    def role_instructions(role: Literal["worker", "expert", "coordinator"], once: bool = False):
+        return {"role": role, "instructions": roles.instructions(role, once)}
+
+    @app.get("/api/v1/projects/{project_id}/prompts")
+    def project_prompts(project_id: s.ID, token: Token):
+        """Short prompts to paste into an agent, filled in for this project."""
+        me = core.whoami(project_id, token)
+        human = me.get("owner_name") or me["actor"]["name"]
+        return roles.prompts(me["project"]["name"], human)
+
+    @app.get("/api/v1/projects/{project_id}/board")
+    def board(project_id: s.ID, token: Token):
+        """The whole team state in one bounded response (coordinators, dashboards)."""
+        return core.board(project_id, token)
+
+    @app.post("/api/v1/projects/{project_id}/runners")
+    def register_runner(project_id: s.ID, data: s.RunnerRegister, token: Token):
+        """Runner heartbeat. Returns its approved/cancelled runs and open questions."""
+        return core.register_runner(project_id, token, data)
+
+    @app.post("/api/v1/projects/{project_id}/runs/{run_id}/state")
+    def run_state(project_id: s.ID, run_id: s.ID, data: s.RunState, token: Token):
+        return core.update_run_state(project_id, token, run_id, data)
+
+    @app.get("/api/v1/projects/{project_id}/me")
+    def me(project_id: s.ID, token: Token):
+        return core.whoami(project_id, token)
+
+    @app.get("/api/v1/projects/{project_id}/ctf.md", response_class=PlainTextResponse)
+    def ctf_markdown(project_id: s.ID, token: Token):
+        return PlainTextResponse(
+            core.briefing(project_id, token), media_type="text/markdown; charset=utf-8"
+        )
+
+    @app.get("/api/v1/projects/{project_id}/briefing")
+    def briefing(project_id: s.ID, token: Token):
+        return {"format": "markdown", "name": "CTF.md", "text": core.briefing(project_id, token)}
 
     @app.post("/api/v1/projects", status_code=201)
     def initialize(data: s.ProjectCreate, token: Token):

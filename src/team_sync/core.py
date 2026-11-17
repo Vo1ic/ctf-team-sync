@@ -14,7 +14,11 @@ from team_sync import schemas as s
 from team_sync.domain import DomainError as DomainError
 from team_sync.domain import digest, fail, record
 from team_sync.editing import EditingOperations, flag_subject, receipt_stage
+from team_sync.fleet import FleetOperations
+from team_sync.graph import GraphOperations
 from team_sync.journal import JournalOperations
+from team_sync.onboarding import OnboardingOperations
+from team_sync.review import ReviewOperations
 from team_sync.settings import Settings
 from team_sync.workflows import WorkflowOperations, actor_records
 
@@ -22,7 +26,15 @@ WRITE_ROLES = {"owner", "coordinator", "worker"}
 LEAD_ROLES = {"owner", "coordinator"}
 
 
-class Core(WorkflowOperations, EditingOperations, JournalOperations):
+class Core(
+    WorkflowOperations,
+    EditingOperations,
+    JournalOperations,
+    OnboardingOperations,
+    GraphOperations,
+    ReviewOperations,
+    FleetOperations,
+):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -92,24 +104,30 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             return {"project": record(project), "actor": record(actor), "token": credential}
 
     def enroll(self, project_id, token, data: s.ActorCreate):
+        from team_sync.onboarding import render_briefing
+
         credential = secrets.token_urlsafe(32)
-        with self.context(project_id, token, write=True, roles={"owner"}) as (db, project, actor):
-            if actor.kind == "agent" and data.kind == "human":
-                fail(403, "human_identity_required", "Only a human owner can issue human access")
-            if data.owner_id:
-                owner = self.get(db, m.Actor, project_id, data.owner_id)
+        with self.context(project_id, token, write=True, roles=WRITE_ROLES) as (db, project, actor):
+            owner_id = self.enroll_permission(db, project, actor, data)
+            if owner_id:
+                owner = self.get(db, m.Actor, project_id, owner_id)
                 if owner.kind != "human":
                     fail(422, "invalid_owner", "An agent owner must be a human actor")
             new_actor = m.Actor(
                 project_id=project_id,
                 token_hash=digest(credential),
-                name=self.unique_name(db, project_id, data.name, data.kind),
-                **data.model_dump(exclude={"name"}),
+                name=self.name_for(db, project_id, data.kind, data.name, owner_id),
+                **data.model_dump(exclude={"name", "owner_id"}),
+                owner_id=owner_id,
             )
             db.add(new_actor)
             db.flush()
             self.emit(db, project, actor, "actor.created", {"resource_id": new_actor.id})
-            return {"actor": record(new_actor), "token": credential}
+            return {
+                "actor": record(new_actor),
+                "token": credential,
+                "briefing": render_briefing(project),
+            }
 
     def snapshot(self, project_id, token):
         with self.context(project_id, token) as (db, project, actor):
@@ -142,6 +160,12 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
 
         with self.context(project_id, token) as (db, project, actor):
             return resource(self, db, project, actor, collection, resource_id, offset, limit)
+
+    def dossier(self, project_id, token, challenge_id):
+        from team_sync.dossier import build
+
+        with self.context(project_id, token) as (db, project, _):
+            return build(db, project, self.get(db, m.Challenge, project_id, challenge_id))
 
     def search(self, project_id, token, query):
         from team_sync.workbench import search
@@ -196,6 +220,10 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             "artifacts": m.Artifact,
             "activities": m.Activity,
             "logs": m.Log,
+            "links": m.Link,
+            "hint_requests": m.HintRequest,
+            "runners": m.Runner,
+            "runs": m.Run,
         }
         with self.context(project_id, token) as (db, _, __):
             return self.rows(db, models[collection], project_id, offset, limit)
@@ -228,6 +256,8 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
                 .where(
                     m.Message.project_id == project_id,
                     or_(m.Message.recipient_id == actor.id, m.Message.recipient_id.is_(None)),
+                    # Your own broadcasts live in the outbox, not in your inbox.
+                    m.Message.sender_id != actor.id,
                 )
                 .order_by(m.Message.created_at, m.Message.id)
                 .offset(offset)
@@ -270,6 +300,19 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             "task.complete": (s.Complete, self.complete, WRITE_ROLES),
             "task.release": (s.Release, self.release, WRITE_ROLES),
             "task.assign": (s.Assign, self.assign_task, WRITE_ROLES),
+            "task.join": (s.TaskJoin, self.join_task, WRITE_ROLES),
+            "task.leave": (s.TaskLeave, self.leave_task, WRITE_ROLES),
+            "task.join_many": (s.TaskJoinMany, self.join_many, WRITE_ROLES),
+            "link.create": (s.LinkCreate, self.create_link, WRITE_ROLES),
+            "link.delete": (s.LinkDelete, self.delete_link, WRITE_ROLES),
+            "hint.request": (s.HintRequestCreate, self.request_hint, WRITE_ROLES),
+            "hint.decide": (s.HintDecision, self.decide_hint, WRITE_ROLES),
+            "hint.used": (s.HintUsed, self.hint_used, WRITE_ROLES),
+            "question.ask": (s.QuestionAsk, self.ask_question, WRITE_ROLES),
+            "question.answer": (s.QuestionAnswer, self.answer_question, WRITE_ROLES),
+            "run.request": (s.RunRequest, self.request_run, WRITE_ROLES),
+            "run.decide": (s.RunDecision, self.decide_run, WRITE_ROLES),
+            "run.cancel": (s.RunCancel, self.cancel_run, WRITE_ROLES),
             "actor.rename": (s.Rename, self.rename_actor, WRITE_ROLES | {"observer"}),
             "activity.report": (s.ActivityReport, self.report_activity, WRITE_ROLES | {"observer"}),
             "artifact.review.request": (s.ReviewRequest, self.review_request, WRITE_ROLES),
@@ -295,10 +338,15 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
                 "due_at": None,
                 "points": None,
                 "source_url": None,
+                "category": None,
+                "allow_duplicate": False,
             },
-            "challenge.create": {"points": None, "source_url": None},
+            "flag.create": {"task_id": None},
+            "task.complete": {"without_flag": False},
+            "flag.verify": {"method": "manual", "evidence": ""},
+            "challenge.create": {"points": None, "source_url": None, "allow_duplicate": False},
             "resource.update": {"force": False},
-            "finding.create": {"artifact_id": None},
+            "finding.create": {"artifact_id": None, "status": None, "based_on": [], "refutes": []},
             "message.ack": {"expected_version": None},
             "message.send": {
                 "kind": "note",
@@ -322,6 +370,27 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
                 return previous.response
             result = handler(db, project, actor, data, resource_id)
             db.flush()
+            if isinstance(result, dict):
+                # Bulk operations return a summary instead of one row.
+                response = {k: v for k, v in result.items() if not k.startswith("_")}
+                ids = response.get("joined") or response.get("already_joined") or []
+                payload = {
+                    "resource_id": ids[0] if ids else resource_id,
+                    "resource_type": response.get("resource_type"),
+                    **{k: response[k] for k in ("actor_id", "category") if response.get(k)},
+                    "count": len(response.get("joined", [])),
+                }
+                self.emit(db, project, actor, result.get("_event_type", operation), payload)
+                db.add(
+                    m.Command(
+                        project_id=project_id,
+                        actor_id=actor.id,
+                        key=key,
+                        fingerprint=fingerprint,
+                        response=response,
+                    )
+                )
+                return response
             response = record(result)
             payload = {"resource_id": response.get("id", resource_id)}
             for field in (
@@ -342,6 +411,7 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
                 payload["artifact_id"] = result.artifact_id
             if hasattr(result, "_revision_id"):
                 payload["revision_id"] = result._revision_id
+            payload.update(getattr(result, "_event_extra", {}))
             if operation != "activity.report" and not getattr(result, "_skip_command_event", False):
                 self.emit(db, project, actor, getattr(result, "_event_type", operation), payload)
             db.add(
@@ -362,11 +432,43 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
         return item
 
     def create_challenge(self, db, project, actor, data, resource_id):
-        return self.insert(db, project, m.Challenge, **data.model_dump())
+        if not data.allow_duplicate:
+            existing = db.scalar(
+                select(m.Challenge.id).where(
+                    m.Challenge.project_id == project.id,
+                    func.lower(func.trim(m.Challenge.title)) == data.title.strip().casefold(),
+                )
+            )
+            if existing:
+                fail(
+                    409,
+                    "duplicate_challenge",
+                    f"A challenge with this title already exists: {existing}",
+                    existing_id=existing,
+                )
+        return self.insert(db, project, m.Challenge, **data.model_dump(exclude={"allow_duplicate"}))
 
     def create_task(self, db, project, actor, data, resource_id):
         if data.challenge_id:
             self.get(db, m.Challenge, project.id, data.challenge_id)
+        if not data.allow_duplicate:
+            existing = db.scalar(
+                select(m.Task.id).where(
+                    m.Task.project_id == project.id,
+                    m.Task.status != "done",
+                    func.lower(func.trim(m.Task.title)) == data.title.strip().casefold(),
+                    (m.Task.challenge_id == data.challenge_id)
+                    if data.challenge_id
+                    else m.Task.challenge_id.is_(None),
+                )
+            )
+            if existing:
+                fail(
+                    409,
+                    "duplicate_task",
+                    f"An unfinished task with this title already exists: {existing}",
+                    existing_id=existing,
+                )
         target = (
             self.get(db, m.Actor, project.id, data.requested_assignee_id)
             if data.requested_assignee_id
@@ -379,7 +481,7 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             project,
             m.Task,
             created_by_id=actor.id,
-            **data.model_dump(exclude={"category", "points", "source_url"}),
+            **data.model_dump(exclude={"category", "points", "source_url", "allow_duplicate"}),
         )
         if target and target.id != actor.id:
             self._notice(
@@ -396,14 +498,24 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
     @staticmethod
     def check_version(task, expected):
         if task.version != expected:
-            fail(409, "version_conflict", f"Current version is {task.version}")
+            fail(
+                409,
+                "version_conflict",
+                f"Current version is {task.version}",
+                current_version=task.version,
+                resource_id=task.id,
+            )
 
     def claim(self, db, project, actor, data, resource_id):
         task = self.get(db, m.Task, project.id, resource_id)
         self.check_version(task, data.expected_version)
         timestamp = db.scalar(select(func.clock_timestamp()))
-        if task.status == "done" or (task.lease_until and task.lease_until > timestamp):
-            fail(409, "task_unavailable", "Task is completed or has a live lease")
+        if task.status in {"done", "review"} or (task.lease_until and task.lease_until > timestamp):
+            fail(
+                409,
+                "task_unavailable",
+                "Task is completed, waits for flag confirmation, or has a live lease",
+            )
         if task.requested_assignee_id not in (None, actor.id):
             fail(403, "task_reserved", "This task is addressed to another participant")
         previous_assignee = task.assignee_id
@@ -469,7 +581,15 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
                 "review_report_required",
                 "Complete artifact analysis with a README and verdict",
             )
-        task.status, task.result, task.lease_until = "done", data.result, None
+        task.result, task.lease_until = data.result, None
+        if self.needs_flag(project, task, data.without_flag) and not self.confirmed_flag(
+            db, project.id, task.challenge_id
+        ):
+            # Not solved until a human confirms a correct flag for this challenge.
+            task.status = "review"
+            self.request_flag_review(db, project, actor, task)
+        else:
+            task.status = "done"
         task.version += 1
         self._after_task(db, project, actor)
         return task
@@ -509,13 +629,30 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             task = self.get(db, m.Task, project.id, data.task_id)
             if data.challenge_id and task.challenge_id != data.challenge_id:
                 fail(422, "scope_mismatch", "Finding challenge does not match its task")
+            # Group task findings under their challenge for search and the web UI.
+            data = data.model_copy(update={"challenge_id": task.challenge_id})
         if data.artifact_id:
             self.get(db, m.Artifact, project.id, data.artifact_id)
-        return self.insert(db, project, m.Finding, author_id=actor.id, **data.model_dump())
+        status = data.status or ("open" if data.kind == "hypothesis" else None)
+        finding = self.insert(
+            db,
+            project,
+            m.Finding,
+            author_id=actor.id,
+            status=status,
+            **data.model_dump(exclude={"status", "based_on", "refutes"}),
+        )
+        self.chain_finding(db, project, actor, finding, data.based_on, data.refutes)
+        return finding
 
     def create_flag(self, db, project, actor, data, resource_id):
         if not project.capabilities.get("flags", False):
             fail(409, "capability_disabled", "Flags are disabled for this project")
+        if data.task_id:
+            task = self.get(db, m.Task, project.id, data.task_id)
+            if data.challenge_id and task.challenge_id and task.challenge_id != data.challenge_id:
+                fail(422, "scope_mismatch", "Flag challenge does not match its task")
+            data = data.model_copy(update={"challenge_id": data.challenge_id or task.challenge_id})
         if data.challenge_id:
             self.get(db, m.Challenge, project.id, data.challenge_id)
         scope_hash = digest(
@@ -525,14 +662,25 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             select(m.Flag).where(m.Flag.project_id == project.id, m.Flag.scope_hash == scope_hash)
         )
         if existing:
-            fail(409, "duplicate_flag", f"Flag already recorded as {existing.id}")
+            fail(
+                409,
+                "duplicate_flag",
+                f"Flag already recorded as {existing.id}",
+                existing_id=existing.id,
+            )
         return self.insert(
             db, project, m.Flag, author_id=actor.id, scope_hash=scope_hash, **data.model_dump()
         )
 
     def verify_flag(self, db, project, actor, data, resource_id):
+        if actor.kind != "human":
+            # Coordinator agents organise work; only a person decides a flag is correct.
+            fail(403, "human_verification_required", "Only a human confirms or rejects flags")
         flag = self.get(db, m.Flag, project.id, resource_id)
         self.check_version(flag, data.expected_version)
+        if not data.evidence.strip():
+            label = "Підтверджено" if data.status == "confirmed" else "Спростовано"
+            data = data.model_copy(update={"evidence": f"{label} без коментаря ({actor.name})"})
         verification = self.insert(
             db,
             project,
@@ -553,6 +701,7 @@ class Core(WorkflowOperations, EditingOperations, JournalOperations):
             "at": db.scalar(select(func.clock_timestamp())).isoformat(),
         }
         flag.version += 1
+        self.settle_reviews(db, project, actor, flag)
         return flag
 
     def create_submission(self, db, project, actor, data, resource_id):

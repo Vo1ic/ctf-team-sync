@@ -9,6 +9,9 @@ const labels = {
   title: "Назва",
   description: "Опис",
   rules: "Правила та контекст",
+  briefing: "CTF.md — опис CTF і порядок роботи",
+  writeup: "Райтап (Markdown)",
+  status: "Стан гіпотези",
   profile: "Формат CTF",
   capabilities: "Спеціалізації",
   role: "Роль",
@@ -89,6 +92,8 @@ const enumLabels = {
   ready: "Готовий до наступного кроку",
 };
 const multiline = new Set([
+  "briefing",
+  "writeup",
   "notes",
   "description",
   "rules",

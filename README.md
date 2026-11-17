@@ -63,9 +63,54 @@ Leases protect server state. They cannot stop an offline agent from continuing
 local work or acting on an external target. An event reaching a client also does
 not prove that its model has processed the message.
 
+## One-line prompts
+
+Give an agent one sentence and it does the rest. The same prompts, filled in for your
+project, are on the web page **Промпти** (`g i`) and in `team-sync-agent prompts`.
+
+- **Set everything up** (agent in the repository): run `scripts/up.sh "CTF name" Nick`
+  and report the web link. It starts server and web, creates the project and invite,
+  detects installed `claude`/`opencode`, writes agent profiles (workers, expert,
+  coordinator), starts the runner in the background and prints the login link.
+- **Worker / expert / coordinator**: "Call get_role(\"worker\") in the team-sync MCP and
+  follow it until I say stop." Role instructions live on the server (`get_role`,
+  `GET /api/v1/roles/{role}`), so prompts stay one line.
+- Humans decide only three things: confirming flags, paid hints, and runs on someone
+  else's machine.
+
 ## Quick start
 
-Requirements: Docker Engine and Docker Compose.
+Fastest path (0.6): one command for the owner, one invite file for each teammate.
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) (Ukrainian) for the full flow and
+[docs/REMOTE.md](docs/REMOTE.md) for a remote server (SSH tunnel or HTTPS via Caddy):
+`scripts/remote.sh deploy user@host "CTF" Nick [--domain sync.example.org]`.
+
+```sh
+scripts/quickstart.sh "CTF Lviv 2026" Vo1ic   # .env, free port, compose up, project, invite
+uv run team-sync-agent --access-file .team-sync/ctf-lviv-2026/owner.json mcp-config --host opencode
+uv run team-sync-agent --access-file .team-sync/ctf-lviv-2026/owner.json import-ctfd --ctfd-url https://ctf.example
+uv run team-sync-agent --access-file .team-sync/ctf-lviv-2026/owner.json workspace --root challenges/ctf
+uv run team-sync-runner --config runner.toml --init --access-file .team-sync/ctf-lviv-2026/owner.json
+```
+
+- `team-sync-runner` (0.9) keeps agents on call: profiles (Claude Code, Codex,
+  opencode…) are defined only in the local `runner.toml`. Strong models answer
+  weaker agents' `ask_expert` questions, a single coordinator runs on a timer, and a
+  run requested by anyone else waits for the machine owner's approval. See
+  [ADR 0009](docs/adr/0009-runners-experts-and-trust.md).
+
+- Every MCP process gets its own agent identity named `<Human>-<Callsign>_<4>`
+  (e.g. `Vo1ic-Desos_b23s`); access files are never shared between live processes.
+- A teammate needs only `invite.json` + the MCP config: their agent asks for a
+  nickname and calls `join_team`. No owner token leaves the owner's machine.
+- The bridge re-reads its access file, so URL/port/project fixes need no restart;
+  errors name the URL and distinguish `server_unreachable` from `wrong_server`.
+- `CTF.md` (rules incl. "never unlock platform hints") is served by the platform and
+  returned on registration; agents re-read it with `get_briefing`.
+- `join_task` / `join_tasks(category=...)` let people and agents cooperate on a task
+  without taking the lease; flags link to tasks and are verified with one click.
+
+Manual setup — requirements: Docker Engine and Docker Compose.
 
 ```sh
 git clone https://github.com/Vo1ic/ctf-team-sync.git
@@ -84,7 +129,7 @@ For example, generate each value separately with `openssl rand -hex 32`.
 Use a hex database password to avoid URL-encoding issues in the Compose connection URL.
 
 ```sh
-docker compose up --build -d
+docker compose up --build -d   # another host port: TEAM_SYNC_HOST_PORT=8010 docker compose up -d
 ```
 
 Open [http://localhost:8000](http://localhost:8000). Choose **Ініціалізувати проєкт**

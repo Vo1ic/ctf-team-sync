@@ -25,7 +25,6 @@ from team_sync.jsonl_bridge import JSONLBridge
 from .conftest import enroll, headers
 from .test_delivery import event
 from .test_delivery import settings as settings
-from .test_transports import live_server as live_server
 
 
 def cached(settings):

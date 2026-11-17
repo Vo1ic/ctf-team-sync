@@ -16,7 +16,6 @@ import pytest
 from team_sync.delivery import AgentSettings, DeliveryError, Receiver, RemoteError, Spool
 
 from .conftest import enroll, execute, headers
-from .test_transports import live_server as live_server
 
 
 @pytest.fixture

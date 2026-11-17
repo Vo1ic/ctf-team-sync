@@ -8,6 +8,7 @@ import time
 
 import httpx
 
+from team_sync import setup_cli
 from team_sync.delivery import AgentSettings, DeliveryError, Receiver, RemoteError, Spool
 from team_sync.host_adapters import HOOK_HOSTS, capabilities
 
@@ -111,7 +112,10 @@ def watch(args, settings, spool):
 
 
 def parser():
-    result = argparse.ArgumentParser(description="Durable delivery for Team Sync agents")
+    result = argparse.ArgumentParser(
+        description="Team Sync for agents: setup (init-project, invite, join, whoami, "
+        "mcp-config, workspace, import-ctfd) and durable event delivery"
+    )
     result.add_argument(
         "--access-file", help="Private connection JSON; no environment export needed"
     )
@@ -147,11 +151,14 @@ def parser():
         "replay", help="Reset a consumer's emission cursor; retains all cached data"
     )
     replay.add_argument("--consumer", required=True)
+    setup_cli.add_parsers(commands)
     return result
 
 
 def main():
     args = parser().parse_args()
+    if args.command in setup_cli.COMMANDS:
+        return setup_cli.run(args)
     if args.command == "capabilities":
         print(json.dumps(capabilities(args.host), indent=2))
         return 0

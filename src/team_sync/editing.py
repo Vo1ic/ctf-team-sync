@@ -23,6 +23,7 @@ MODELS = {
         ("artifacts", m.Artifact),
         ("activities", m.Activity),
         ("logs", m.Log),
+        ("hint_requests", m.HintRequest),
     ]
 }
 FIELDS = {
@@ -267,6 +268,37 @@ class EditingOperations:
         if "name" in changes:
             changes["name"] = self.unique_name(db, project.id, changes["name"], item.kind, item.id)
 
+    def _override_lease(self, db, project, actor, item, reason):
+        """Take a live assignment away (coordinator override, audited and announced)."""
+        old = self.get(db, m.Actor, project.id, item.assignee_id)
+        item.status, item.assignee_id, item.lease_until = "open", None, None
+        if item.kind == "artifact_review":
+            item.approval_status, item.approved_by_id, item.analysis_started_at = (
+                "pending",
+                None,
+                None,
+            )
+            item.approval_note = None
+        self._after_task(db, project, old, caller=actor)
+        if old.id != actor.id and old.active:
+            self._notice(
+                db,
+                project,
+                actor,
+                old.id,
+                f"{actor.name} змінив призначення «{item.title}». {reason}",
+                item,
+                "status",
+                control=True,
+            )
+        self.emit(
+            db,
+            project,
+            actor,
+            "task.override",
+            {"resource_id": item.id, "previous_assignee_id": old.id, "resource_type": "tasks"},
+        )
+
     def _edit_task(self, db, project, actor, item, changes, reason, force=False):
         controls = set(changes) & {"status", "requested_assignee_id"}
         timestamp = db.scalar(select(func.clock_timestamp()))
@@ -288,36 +320,20 @@ class EditingOperations:
                     "override_reason_required",
                     "Explain why the active assignment is being changed",
                 )
-            old = self.get(db, m.Actor, project.id, item.assignee_id)
-            item.status, item.assignee_id, item.lease_until = "open", None, None
-            if item.kind == "artifact_review":
-                item.approval_status, item.approved_by_id, item.analysis_started_at = (
-                    "pending",
-                    None,
-                    None,
-                )
-                item.approval_note = None
-            self._after_task(db, project, old, caller=actor)
-            if old.id != actor.id and old.active:
-                self._notice(
-                    db,
-                    project,
-                    actor,
-                    old.id,
-                    f"{actor.name} змінив призначення «{item.title}». {reason}",
-                    item,
-                    "status",
-                    control=True,
-                )
-            self.emit(
-                db,
-                project,
-                actor,
-                "task.override",
-                {"resource_id": item.id, "previous_assignee_id": old.id, "resource_type": "tasks"},
-            )
+            self._override_lease(db, project, actor, item, reason)
         if changes.get("status", item.status) == "done" and not changes.get("result", item.result):
             fail(422, "result_required", "A completed task requires a result")
+        if (
+            changes.get("status") == "done"
+            and (actor.role not in {"owner", "coordinator"} or actor.kind != "human")
+            and self.needs_flag(project, item)
+            and not self.confirmed_flag(db, project.id, item.challenge_id)
+        ):
+            fail(
+                403,
+                "flag_confirmation_required",
+                "A challenge task is done only after a human confirms its flag",
+            )
         if "challenge_id" in changes:
             if changes["challenge_id"]:
                 self.get(db, m.Challenge, project.id, changes["challenge_id"])

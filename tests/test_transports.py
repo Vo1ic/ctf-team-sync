@@ -1,41 +1,15 @@
 import asyncio
 import json
 import os
-import socket
 import sys
-import time
 from contextlib import asynccontextmanager
-from threading import Thread
 from uuid import uuid4
 
 import httpx
-import pytest
-import uvicorn
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from .conftest import enroll, execute, headers
-
-
-@pytest.fixture
-def live_server(app):
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="on"))
-    thread = Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + 10
-        while not server.started:
-            if not thread.is_alive() or time.monotonic() > deadline:
-                raise RuntimeError("HTTP server did not start")
-            time.sleep(0.01)
-        yield f"http://127.0.0.1:{port}"
-    finally:
-        server.should_exit = True
-        thread.join(timeout=10)
-        listener.close()
 
 
 def test_sse_reconnect_and_live_long_poll(client, project, live_server):

@@ -1,6 +1,7 @@
 """Human decisions, independent agents, durable reports and overload boundaries."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -293,7 +294,20 @@ def test_names_are_unique_and_activity_is_explicit_and_expires(client, project, 
     agents = [
         client.post(path, headers=headers(project["token"]), json={}).json() for _ in range(2)
     ]
-    assert [item["actor"]["name"] for item in agents] == ["Nova", "Atlas"]
+    # Agent names carry the human owner's name: Captain-<Callsign>_<4 chars>.
+    names = [item["actor"]["name"] for item in agents]
+    assert all(re.fullmatch(r"Captain-[A-Za-z]+_[a-z0-9]{4}", name) for name in names)
+    assert len(set(names)) == 2
+    assert all(item["actor"]["owner_id"] == project["actor"]["id"] for item in agents)
+    assert "CTF.md" in agents[0]["briefing"] and "підказки" in agents[0]["briefing"]
+    command(
+        client,
+        project,
+        "actor.rename",
+        {"expected_version": 1, "name": "Nova"},
+        agents[0]["actor"]["id"],
+        agents[0]["token"],
+    )
     renamed = command(
         client,
         project,

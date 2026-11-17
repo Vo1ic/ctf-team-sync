@@ -49,7 +49,22 @@
       "changes"
     ],
     "title": "ResourceEdit",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "resource.update",
+        "resource_id": "00000000-0000-4000-8000-000000000001",
+        "arguments": {
+          "collection": "tasks",
+          "expected_version": 3,
+          "changes": {
+            "priority": "urgent"
+          },
+          "reason": "blocks two other tasks"
+        },
+        "idempotency_key": "edit-1"
+      }
+    ]
   },
   "log.create": {
     "additionalProperties": false,
@@ -160,6 +175,12 @@
         ],
         "default": null,
         "title": "Source Url"
+      },
+      "allow_duplicate": {
+        "default": false,
+        "description": "Create even when an equally titled record already exists (409 otherwise).",
+        "title": "Allow Duplicate",
+        "type": "boolean"
       }
     },
     "required": [
@@ -185,19 +206,43 @@
         "type": "string"
       },
       "category": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
         "default": null,
-        "title": "Category",
-        "type": "null"
+        "description": "Accepted for compatibility and ignored; set it on the challenge.",
+        "title": "Category"
       },
       "points": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
         "default": null,
-        "title": "Points",
-        "type": "null"
+        "description": "Accepted for compatibility and ignored; set it on the challenge.",
+        "title": "Points"
       },
       "source_url": {
         "default": null,
         "title": "Source Url",
         "type": "null"
+      },
+      "allow_duplicate": {
+        "default": false,
+        "description": "Create even when an equally titled record already exists (409 otherwise).",
+        "title": "Allow Duplicate",
+        "type": "boolean"
       },
       "challenge_id": {
         "anyOf": [
@@ -253,7 +298,17 @@
       "title"
     ],
     "title": "TaskCreate",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "task.create",
+        "arguments": {
+          "title": "Solve: Clipboard Heist Pt. 2",
+          "challenge_id": "00000000-0000-4000-8000-000000000001"
+        },
+        "idempotency_key": "create-clipboard-2"
+      }
+    ]
   },
   "task.claim": {
     "additionalProperties": false,
@@ -275,7 +330,18 @@
       "expected_version"
     ],
     "title": "Lease",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "task.claim",
+        "resource_id": "00000000-0000-4000-8000-000000000001",
+        "arguments": {
+          "expected_version": 1,
+          "lease_seconds": 900
+        },
+        "idempotency_key": "claim-1"
+      }
+    ]
   },
   "task.renew": {
     "additionalProperties": false,
@@ -313,6 +379,12 @@
         "pattern": "\\S",
         "title": "Result",
         "type": "string"
+      },
+      "without_flag": {
+        "default": false,
+        "description": "Helper work that does not produce the challenge flag. Otherwise a challenge task stays in review until a human confirms a flag.",
+        "title": "Without Flag",
+        "type": "boolean"
       }
     },
     "required": [
@@ -365,12 +437,573 @@
         ],
         "default": null,
         "title": "Recipient Id"
+      },
+      "force": {
+        "default": false,
+        "description": "Coordinator override: take a LIVE assignment away (needs reason).",
+        "title": "Force",
+        "type": "boolean"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Reason",
+        "type": "string"
       }
     },
     "required": [
       "expected_version"
     ],
     "title": "Assign",
+    "type": "object"
+  },
+  "task.join": {
+    "additionalProperties": false,
+    "properties": {
+      "actor_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Default self. An agent may act for its human owner; leads for anyone.",
+        "title": "Actor Id"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 300,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "title": "TaskJoin",
+    "type": "object",
+    "examples": [
+      {
+        "operation": "task.join",
+        "resource_id": "00000000-0000-4000-8000-000000000001",
+        "arguments": {
+          "note": "checking the pcap in parallel"
+        },
+        "idempotency_key": "join-1"
+      }
+    ]
+  },
+  "task.leave": {
+    "additionalProperties": false,
+    "properties": {
+      "actor_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actor Id"
+      }
+    },
+    "title": "TaskLeave",
+    "type": "object"
+  },
+  "task.join_many": {
+    "additionalProperties": false,
+    "description": "Join every unfinished task of a category or challenge, e.g. 'I take all forensics'.",
+    "properties": {
+      "category": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Category"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      },
+      "actor_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actor Id"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 300,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "title": "TaskJoinMany",
+    "type": "object",
+    "examples": [
+      {
+        "operation": "task.join_many",
+        "arguments": {
+          "category": "forensics"
+        },
+        "idempotency_key": "take-all-forensics"
+      }
+    ]
+  },
+  "link.create": {
+    "additionalProperties": false,
+    "description": "One edge: artifact attached_to challenge/task/finding, or finding chains.\n\nleads_to: finding/task -> finding/flag/task; supports/supersedes: finding -> finding;\nrefutes: finding -> finding/flag (a refuted hypothesis changes its status).",
+    "properties": {
+      "source_type": {
+        "enum": [
+          "challenge",
+          "task",
+          "finding",
+          "flag",
+          "artifact"
+        ],
+        "title": "Source Type",
+        "type": "string"
+      },
+      "source_id": {
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "target_type": {
+        "enum": [
+          "challenge",
+          "task",
+          "finding",
+          "flag",
+          "artifact"
+        ],
+        "title": "Target Type",
+        "type": "string"
+      },
+      "target_id": {
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "title": "Target Id",
+        "type": "string"
+      },
+      "relation": {
+        "enum": [
+          "attached_to",
+          "leads_to",
+          "supports",
+          "refutes",
+          "supersedes"
+        ],
+        "title": "Relation",
+        "type": "string"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_type",
+      "source_id",
+      "target_type",
+      "target_id",
+      "relation"
+    ],
+    "title": "LinkCreate",
+    "type": "object"
+  },
+  "link.delete": {
+    "additionalProperties": false,
+    "description": "Remove one edge; the linked records themselves are never deleted.",
+    "properties": {},
+    "title": "LinkDelete",
+    "type": "object"
+  },
+  "hint.request": {
+    "additionalProperties": false,
+    "description": "Ask a human to approve a paid platform hint; requires published evidence first.",
+    "properties": {
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "reason": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Reason",
+        "type": "string"
+      },
+      "hint_ref": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Hint Ref",
+        "type": "string"
+      },
+      "cost": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cost"
+      }
+    },
+    "required": [
+      "reason"
+    ],
+    "title": "HintRequestCreate",
+    "type": "object"
+  },
+  "hint.decide": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "decision": {
+        "enum": [
+          "approved",
+          "declined"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "decision"
+    ],
+    "title": "HintDecision",
+    "type": "object"
+  },
+  "hint.used": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "content": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Content",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "content"
+    ],
+    "title": "HintUsed",
+    "type": "object"
+  },
+  "question.ask": {
+    "additionalProperties": false,
+    "description": "Ask a stronger expert agent (or a human) a focused question about your work.",
+    "properties": {
+      "question": {
+        "description": "One focused question, e.g. 'What is hidden in this PNG?'",
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Question",
+        "type": "string"
+      },
+      "details": {
+        "description": "What you see: data, output, where exactly you are stuck",
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Details",
+        "type": "string"
+      },
+      "tried": {
+        "description": "What you already tested and what happened (required, be concrete)",
+        "maxLength": 100000,
+        "minLength": 20,
+        "pattern": "\\S",
+        "title": "Tried",
+        "type": "string"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "challenge_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Challenge Id"
+      },
+      "skills": {
+        "items": {
+          "enum": [
+            "general",
+            "vision",
+            "crypto",
+            "reversing",
+            "pwn",
+            "web",
+            "forensics",
+            "stego",
+            "osint",
+            "math",
+            "network"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "title": "Skills",
+        "type": "array"
+      },
+      "artifact_ids": {
+        "items": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "maxItems": 10,
+        "title": "Artifact Ids",
+        "type": "array"
+      },
+      "priority": {
+        "default": "normal",
+        "enum": [
+          "normal",
+          "urgent"
+        ],
+        "title": "Priority",
+        "type": "string"
+      }
+    },
+    "required": [
+      "question",
+      "details",
+      "tried"
+    ],
+    "title": "QuestionAsk",
+    "type": "object"
+  },
+  "question.answer": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "answer": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "title": "Answer",
+        "type": "string"
+      },
+      "confidence": {
+        "default": "medium",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "Confidence",
+        "type": "string"
+      },
+      "evidence": {
+        "default": "",
+        "maxLength": 100000,
+        "title": "Evidence",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "answer"
+    ],
+    "title": "QuestionAnswer",
+    "type": "object"
+  },
+  "run.request": {
+    "additionalProperties": false,
+    "description": "Ask a runner to start one of its locally defined profiles.",
+    "properties": {
+      "profile": {
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+        "title": "Profile",
+        "type": "string"
+      },
+      "runner_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Default: an online runner that offers the profile",
+        "title": "Runner Id"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile"
+    ],
+    "title": "RunRequest",
+    "type": "object"
+  },
+  "run.decide": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "decision": {
+        "enum": [
+          "approved",
+          "declined"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "note": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version",
+      "decision"
+    ],
+    "title": "RunDecision",
+    "type": "object"
+  },
+  "run.cancel": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_version": {
+        "minimum": 1,
+        "title": "Expected Version",
+        "type": "integer"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Reason",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_version"
+    ],
+    "title": "RunCancel",
     "type": "object"
   },
   "actor.rename": {
@@ -597,7 +1230,8 @@
           "observation",
           "hypothesis",
           "result",
-          "failed_attempt"
+          "failed_attempt",
+          "decoy"
         ],
         "title": "Kind",
         "type": "string"
@@ -647,6 +1281,44 @@
         ],
         "default": null,
         "title": "Artifact Id"
+      },
+      "status": {
+        "anyOf": [
+          {
+            "enum": [
+              "open",
+              "confirmed",
+              "refuted"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Hypothesis state; a new hypothesis defaults to open.",
+        "title": "Status"
+      },
+      "based_on": {
+        "description": "Findings this one follows from (creates leads_to edges: chain/graph).",
+        "items": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "maxItems": 20,
+        "title": "Based On",
+        "type": "array"
+      },
+      "refutes": {
+        "description": "Findings this one disproves; refuted hypotheses change state.",
+        "items": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "maxItems": 20,
+        "title": "Refutes",
+        "type": "array"
       }
     },
     "required": [
@@ -655,7 +1327,20 @@
       "evidence"
     ],
     "title": "FindingCreate",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "finding.create",
+        "arguments": {
+          "title": "Archive password reused from the PNG comment",
+          "body": "7z accepts the password from exiftool Comment.",
+          "evidence": "exiftool img.png | grep Comment; 7z t data.7z -p<redacted> -> OK",
+          "kind": "result",
+          "task_id": "00000000-0000-4000-8000-000000000001"
+        },
+        "idempotency_key": "finding-1"
+      }
+    ]
   },
   "flag.create": {
     "additionalProperties": false,
@@ -678,7 +1363,21 @@
           }
         ],
         "default": null,
+        "description": "Derived from task_id when omitted.",
         "title": "Challenge Id"
+      },
+      "task_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Task Id"
       },
       "target": {
         "anyOf": [
@@ -727,7 +1426,17 @@
       "value"
     ],
     "title": "FlagCreate",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "flag.create",
+        "arguments": {
+          "value": "CTF{<redacted>}",
+          "task_id": "00000000-0000-4000-8000-000000000001"
+        },
+        "idempotency_key": "flag-1"
+      }
+    ]
   },
   "flag.verify": {
     "additionalProperties": false,
@@ -746,6 +1455,7 @@
         "type": "string"
       },
       "method": {
+        "default": "manual",
         "enum": [
           "manual",
           "local_checker",
@@ -755,21 +1465,30 @@
         "type": "string"
       },
       "evidence": {
+        "default": "",
+        "description": "Optional; a quick decision records who decided and when.",
         "maxLength": 100000,
-        "minLength": 1,
-        "pattern": "\\S",
         "title": "Evidence",
         "type": "string"
       }
     },
     "required": [
       "expected_version",
-      "status",
-      "method",
-      "evidence"
+      "status"
     ],
     "title": "FlagVerify",
-    "type": "object"
+    "type": "object",
+    "examples": [
+      {
+        "operation": "flag.verify",
+        "resource_id": "00000000-0000-4000-8000-000000000002",
+        "arguments": {
+          "expected_version": 1,
+          "status": "confirmed"
+        },
+        "idempotency_key": "verify-1"
+      }
+    ]
   },
   "submission.create": {
     "additionalProperties": false,

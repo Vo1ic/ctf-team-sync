@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:17-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: team_sync
       POSTGRES_PASSWORD: ${TEAM_SYNC_DB_PASSWORD:?Set TEAM_SYNC_DB_PASSWORD}
@@ -14,12 +15,14 @@ services:
       retries: 20
   server:
     build: .
+    restart: unless-stopped
     environment:
       TEAM_SYNC_DATABASE_URL: postgresql+psycopg://team_sync:${TEAM_SYNC_DB_PASSWORD}@db:5432/team_sync
       TEAM_SYNC_BOOTSTRAP_TOKEN: ${TEAM_SYNC_BOOTSTRAP_TOKEN:?Set TEAM_SYNC_BOOTSTRAP_TOKEN}
       TEAM_SYNC_ARTIFACT_DIR: /data/artifacts
     ports:
-      - "127.0.0.1:8000:8000"
+      # Host port is configurable: TEAM_SYNC_HOST_PORT=8010 docker compose up -d
+      - "127.0.0.1:${TEAM_SYNC_HOST_PORT:-8000}:8000"
     volumes:
       - artifacts:/data/artifacts
     depends_on:

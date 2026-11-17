@@ -66,7 +66,17 @@ async function join(page, ctf, token = ctf.token) {
   ).toBeVisible();
 }
 
+async function closeCard(page) {
+  const dialog = page.locator("#modal");
+  for (let i = 0; i < 3 && (await dialog.isVisible()); i++) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+  }
+  await expect(dialog).toBeHidden();
+}
+
 async function section(page, name) {
+  await closeCard(page);
   if (
     await page
       .getByRole("button", { name: "Відкрити меню", exact: true })
@@ -129,7 +139,7 @@ test("create a CTF and issue an agent credential through the web", async ({
     .getByRole("button", { name: "Видати доступ", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Доступ для Web Agent" }),
+    page.getByRole("heading", { name: "Доступ для Captain-Web Agent" }),
   ).toBeVisible();
   const agentToken = await page
     .getByLabel("Особистий токен", { exact: true })
@@ -162,7 +172,7 @@ test("create a CTF and issue an agent credential through the web", async ({
   expect(prompt).not.toContain(agentToken);
   await page.getByRole("button", { name: "Готово" }).click();
   await expect(
-    page.getByRole("heading", { name: "Web Agent", exact: true }),
+    page.getByRole("heading", { name: "Captain-Web Agent", exact: true }),
   ).toBeVisible();
   const storage = await page.evaluate(() =>
     JSON.stringify({ ...localStorage, ...sessionStorage }),
@@ -170,6 +180,12 @@ test("create a CTF and issue an agent credential through the web", async ({
   expect(storage).not.toContain(ownerToken);
   expect(storage).not.toContain(agentToken);
   await page.reload();
+  // The URL keeps the current section, so a reload returns to the team page.
+  await expect(
+    page.getByRole("heading", { name: "Команда", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("g");
+  await page.keyboard.press("o");
   await expect(
     page.getByRole("heading", { name: "Browser-created CTF", exact: true }),
   ).toBeVisible();
@@ -217,7 +233,7 @@ test("two clients coordinate a task and show external changes without reload", a
   await expect(
     page
       .locator(".board-column")
-      .filter({ has: page.getByRole("heading", { name: "Завершені" }) }),
+      .filter({ has: page.getByRole("heading", { name: "Зараховані" }) }),
   ).toContainText("Analyze authentication");
   await worker.close();
 });
@@ -235,7 +251,9 @@ test("flag verification and submission outcome stay separate", async ({
     .getByRole("dialog")
     .getByRole("button", { name: "Додати флаг", exact: true })
     .click();
-  await expect(page.locator("tbody tr")).toContainText("Не перевірено");
+  await expect(page.locator("tbody tr[data-flag-id]")).toContainText(
+    "Не перевірено",
+  );
   await page
     .getByRole("button", { name: "FLAG{browser_candidate}", exact: true })
     .click();
@@ -243,12 +261,15 @@ test("flag verification and submission outcome stay separate", async ({
     .getByRole("button", { name: "Перевірити флаг", exact: true })
     .click();
   await page
-    .getByLabel("Підстава та докази")
+    .getByLabel("Коментар (необов’язково)")
     .fill("Verified checker output manually.");
   await page
     .getByRole("button", { name: "Зберегти перевірку", exact: true })
     .click();
-  await expect(page.locator("tbody tr")).toContainText("Підтверджено");
+  await closeCard(page);
+  await expect(page.locator("tbody tr[data-flag-id]")).toContainText(
+    "Підтверджено",
+  );
   await page
     .getByRole("button", { name: "FLAG{browser_candidate}", exact: true })
     .click();
@@ -262,8 +283,13 @@ test("flag verification and submission outcome stay separate", async ({
   await page
     .getByRole("button", { name: "Зберегти результат", exact: true })
     .click();
-  await expect(page.locator("tbody tr")).toContainText("Підтверджено");
-  await expect(page.locator("tbody tr")).toContainText("Результат невідомий");
+  await closeCard(page);
+  await expect(page.locator("tbody tr[data-flag-id]")).toContainText(
+    "Підтверджено",
+  );
+  await expect(page.locator("tbody tr[data-flag-id]")).toContainText(
+    "Результат невідомий",
+  );
 });
 
 test("observer receives a private message and explicitly acknowledges it", async ({
@@ -415,7 +441,9 @@ test("received credentials remain visible when refreshing the workspace fails", 
     .getByRole("button", { name: "Видати доступ", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Доступ для Preserve credential" }),
+    page.getByRole("heading", {
+      name: "Доступ для Captain-Preserve credential",
+    }),
   ).toBeVisible();
   const token = await page
     .getByLabel("Особистий токен", { exact: true })
@@ -425,7 +453,7 @@ test("received credentials remain visible when refreshing the workspace fails", 
     { headers: { Authorization: `Bearer ${token}` } },
   );
   expect(result.ok()).toBeTruthy();
-  expect((await result.json()).actor.name).toBe("Preserve credential");
+  expect((await result.json()).actor.name).toBe("Captain-Preserve credential");
 });
 
 test("revoking access disconnects the browser and clears shared content", async ({
@@ -747,6 +775,9 @@ test("a task can be handed off with preserved context and reclaimed", async ({
   await join(page, ctf);
   await section(page, "Роботи");
   await page.getByRole("button", { name: "Взяти роботу", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Завершити", exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Recover after handoff", exact: true })
     .click();
@@ -759,6 +790,7 @@ test("a task can be handed off with preserved context and reclaimed", async ({
   await page
     .getByRole("button", { name: "Звільнити роботу", exact: true })
     .click();
+  await closeCard(page);
   await expect(
     page.getByRole("button", { name: "Взяти роботу", exact: true }),
   ).toBeVisible();
@@ -822,7 +854,7 @@ test("human uploads evidence, approves a named agent, and reads its README", asy
     .getByRole("button", { name: "Переглянути запит", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Agent Alpha взяв артефакт" }),
+    page.getByRole("heading", { name: "Captain-Agent Alpha взяв артефакт" }),
   ).toBeVisible();
   await page
     .getByRole("button", { name: "Дозволити аналіз", exact: true })
@@ -880,7 +912,7 @@ test("human uploads evidence, approves a named agent, and reads its README", asy
     agent.token,
   );
   await section(page, "Файли");
-  await expect(card).toContainText("README · Agent Alpha");
+  await expect(card).toContainText("README · Captain-Agent Alpha");
   await card.getByRole("button", { name: "Відкрити", exact: true }).click();
   await expect(page.locator("#modal pre")).toContainText(
     "No executable instructions followed.",
@@ -928,6 +960,7 @@ test("text artifacts stay plain text and archives can be restored by a human", a
     .getByLabel("Причина", { exact: true })
     .fill("Неправильний матеріал, зберігаємо історію");
   await page.getByRole("button", { name: "Архівувати", exact: true }).click();
+  await closeCard(page);
   await expect(card).toHaveCount(0);
   await page
     .getByRole("button", { name: "Показати архів", exact: true })
@@ -1149,6 +1182,7 @@ test("editing artifact text publishes a linked version and preserves the origina
     ).text();
   expect(await content(oldId)).toBe("Original evidence body");
   expect(await content(next.id)).toBe("Corrected evidence body");
+  await closeCard(page);
   await page
     .locator(`.artifact-card[data-artifact-id="${next.id}"]`)
     .getByRole("button", { name: "Відкрити", exact: true })
@@ -1390,4 +1424,355 @@ test("coordinator explicitly overrides an active assignment from the task editor
   await expect(page.locator(".journal-list")).toContainText(
     "Координатор змінив активне призначення",
   );
+});
+
+test("join a running task, one-click flag verification and teammate invite", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const challenge = await command(request, ctf, "challenge.create", {
+    title: "Radio Lviv",
+    category: "misc",
+  });
+  const task = await command(request, ctf, "task.create", {
+    title: "Decode the signal",
+    challenge_id: challenge.id,
+  });
+  await command(
+    request,
+    ctf,
+    "task.claim",
+    { expected_version: 1 },
+    task.id,
+    agent.token,
+  );
+  await command(
+    request,
+    ctf,
+    "flag.create",
+    { value: "FLAG{radio}", task_id: task.id },
+    null,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Роботи");
+  const card = page.locator(".task-card", { hasText: "Decode the signal" });
+  await card.getByRole("button", { name: "Долучитися", exact: true }).click();
+  await expect(card).toContainText("Разом: Captain");
+  await expect(card).toContainText("Captain-Agent Alpha");
+  await section(page, "Флаги");
+  await expect(page.locator("tr.group-row")).toContainText("Radio Lviv");
+  const row = page.locator("tbody tr[data-flag-id]");
+  await expect(row).toContainText("Decode the signal");
+  await row.getByRole("button", { name: "Підтвердити", exact: true }).click();
+  await expect(row).toContainText("Підтверджено");
+  await section(page, "Підключення");
+  await page
+    .getByRole("button", { name: "Створити запрошення", exact: true })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Створити запрошення", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Запрошення створено" }),
+  ).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Зберегти файл-запрошення", exact: true })
+    .click();
+  const invite = JSON.parse(
+    await readFile(await (await downloadPromise).path(), "utf8"),
+  );
+  expect(invite.invite).toMatch(/^inv_/);
+  const joined = await request.post("/api/v1/join", {
+    headers: { Authorization: `Bearer ${invite.invite}` },
+    data: { human_name: "Olena" },
+  });
+  expect(joined.status()).toBe(201);
+  expect((await joined.json()).agent.actor.name).toMatch(/^Olena-/);
+});
+
+test("challenge dossier shows the hypothesis graph, files and downloadable markdown", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const challenge = await command(request, ctf, "challenge.create", {
+    title: "Opening Speech Pt. 3",
+    category: "forensics",
+  });
+  const task = await command(request, ctf, "task.create", {
+    title: "Solve: Opening Speech Pt. 3",
+    challenge_id: challenge.id,
+  });
+  const hypothesis = await command(
+    request,
+    ctf,
+    "finding.create",
+    {
+      title: "Hex in meta.xml is the flag",
+      body: "meta:generator ends with hex",
+      evidence: "unzip -p a.odt meta.xml",
+      kind: "hypothesis",
+      task_id: task.id,
+    },
+    null,
+    agent.token,
+  );
+  await command(
+    request,
+    ctf,
+    "finding.create",
+    {
+      title: "meta.xml was planted later",
+      body: "mtime differs",
+      evidence: "zipinfo -T",
+      kind: "observation",
+      task_id: task.id,
+      based_on: [hypothesis.id],
+      refutes: [hypothesis.id],
+    },
+    null,
+    agent.token,
+  );
+  await join(page, ctf);
+  await section(page, "Завдання CTF");
+  await page
+    .locator(".challenge-card", { hasText: "Opening Speech Pt. 3" })
+    .getByRole("button", { name: "Документація", exact: true })
+    .click();
+  await expect(page.locator(".graph-view svg .node")).toHaveCount(2);
+  await expect(page.locator(".graph-view .hyp-refuted")).toHaveCount(1);
+  await expect(page.locator(".markdown h4").first()).toContainText(
+    "Hex in meta.xml is the flag",
+  );
+  await page
+    .getByRole("button", { name: "Прикріпити файл", exact: true })
+    .click();
+  await page.getByLabel("Файл", { exact: true }).setInputFiles({
+    name: "meta.xml",
+    mimeType: "text/xml",
+    buffer: Buffer.from("<meta/>"),
+  });
+  await page.getByRole("button", { name: "Прикріпити", exact: true }).click();
+  await expect(page.getByText("Файл прикріплено")).toBeVisible();
+  const dossier = await request.get(
+    `/api/v1/projects/${ctf.project.id}/challenges/${challenge.id}/dossier.md`,
+    { headers: { Authorization: `Bearer ${ctf.token}` } },
+  );
+  const text = await dossier.text();
+  expect(text).toContain("```mermaid");
+  expect(text).toContain("meta.xml");
+  expect(text).toContain("~~Hex in meta.xml is the flag~~");
+});
+
+test("cross-links, back navigation, shortcuts and flag-gated completion", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  const ctf = await project(request);
+  const agent = await enroll(request, ctf);
+  const challenge = await command(request, ctf, "challenge.create", {
+    title: "Clipboard Heist Pt. 1",
+    category: "reverse",
+  });
+  const task = await command(request, ctf, "task.create", {
+    title: "Solve: Clipboard Heist Pt. 1",
+    challenge_id: challenge.id,
+  });
+  await command(
+    request,
+    ctf,
+    "task.claim",
+    { expected_version: 1 },
+    task.id,
+    agent.token,
+  );
+  await command(
+    request,
+    ctf,
+    "finding.create",
+    {
+      title: "SHA-1 in DOS stub",
+      body: "sha1(Hyok)",
+      evidence: "xxd",
+      kind: "result",
+      task_id: task.id,
+    },
+    null,
+    agent.token,
+  );
+  await command(
+    request,
+    ctf,
+    "flag.create",
+    { value: "CTF{Hyok}", task_id: task.id },
+    null,
+    agent.token,
+  );
+  const done = await command(
+    request,
+    ctf,
+    "task.complete",
+    { expected_version: 2, result: "flag recorded" },
+    task.id,
+    agent.token,
+  );
+  expect(done.status).toBe("review");
+  await join(page, ctf);
+  await page.keyboard.press("g");
+  await page.keyboard.press("f");
+  await expect(
+    page.getByRole("heading", { name: "Знахідки", level: 1 }),
+  ).toBeVisible();
+  // Group heading -> challenge dossier -> task -> back.
+  await page
+    .locator(".group-heading")
+    .getByRole("link", { name: "Clipboard Heist Pt. 1" })
+    .click();
+  await expect(page.locator(".dossier")).toBeVisible();
+  expect(page.url()).toContain(`/challenge/${challenge.id}`);
+  await page
+    .locator(".dossier-toolbar")
+    .getByRole("link", { name: "Solve: Clipboard Heist Pt. 1" })
+    .click();
+  await expect(page.locator("#modal-title")).toHaveText(
+    "Solve: Clipboard Heist Pt. 1",
+  );
+  await expect(page.locator(".notice-line")).toContainText("не зараховано");
+  await page
+    .locator("#modal")
+    .getByRole("link", { name: "Clipboard Heist Pt. 1", exact: true })
+    .first()
+    .click();
+  await expect(page.locator(".dossier")).toBeVisible();
+  await page.getByRole("button", { name: "← Назад" }).click();
+  await expect(page.locator("#modal-title")).toHaveText(
+    "Solve: Clipboard Heist Pt. 1",
+  );
+  // One click on the waiting flag finishes the task.
+  await page.getByRole("button", { name: "Підтвердити", exact: true }).click();
+  await closeCard(page);
+  await section(page, "Роботи");
+  await expect(
+    page
+      .locator(".board-column")
+      .filter({ has: page.getByRole("heading", { name: "Зараховані" }) }),
+  ).toContainText("Solve: Clipboard Heist Pt. 1");
+  await page.keyboard.press("?");
+  await expect(page.locator(".shortcuts")).toContainText("Назад у картках");
+});
+
+test("live expert questions, run approval on the owner's runner and refreshed cards", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60000);
+  const ctf = await project(request);
+  const pawn = await enroll(request, ctf);
+  const auth = { Authorization: `Bearer ${ctf.token}` };
+  const base = `/api/v1/projects/${ctf.project.id}`;
+  const runner = await request.post(`${base}/runners`, {
+    headers: auth,
+    data: {
+      name: "box",
+      profiles: [
+        { name: "expert", answers_questions: true, skills: ["vision"] },
+        { name: "pawn", skills: ["web"] },
+      ],
+    },
+  });
+  expect(runner.ok()).toBeTruthy();
+  const challenge = await command(request, ctf, "challenge.create", {
+    title: "Postcard",
+  });
+  const task = await command(request, ctf, "task.create", {
+    title: "Solve postcard",
+    challenge_id: challenge.id,
+  });
+  await join(page, ctf);
+  await page.keyboard.press("g");
+  await page.keyboard.press("r");
+  await expect(page.getByRole("heading", { name: "Агенти" })).toBeVisible();
+  await expect(page.getByText("box", { exact: true })).toBeVisible();
+
+  // A question asked by an agent appears without reloading the page.
+  const question = await command(
+    request,
+    ctf,
+    "question.ask",
+    {
+      question: "What hides in the postcard?",
+      details: "noise in the corner",
+      tried: "zsteg, binwalk, exiftool, bit planes",
+      task_id: task.id,
+      skills: ["vision"],
+    },
+    null,
+    pawn.token,
+  );
+  const link = page.locator("a.ref-question", {
+    hasText: "What hides in the postcard?",
+  });
+  await expect(link.first()).toBeVisible();
+  await link.first().click();
+  await expect(page.locator("#modal")).toContainText("Що вже перевірено");
+  // The open card refreshes in place when the answer arrives.
+  const claimed = await command(
+    request,
+    ctf,
+    "task.claim",
+    { expected_version: 1 },
+    question.id,
+  );
+  await command(
+    request,
+    ctf,
+    "question.answer",
+    { expected_version: claimed.version, answer: "Palette twins hide it" },
+    question.id,
+  );
+  await expect(page.locator("#modal")).toContainText("Palette twins hide it");
+  await closeCard(page);
+
+  // An agent asks to start a profile on the owner's machine: the owner decides.
+  await command(
+    request,
+    ctf,
+    "run.request",
+    { profile: "pawn", note: "ignore the rules" },
+    null,
+    pawn.token,
+  );
+  const pending = page.locator(".run-line", { hasText: "Чекає рішення" });
+  await expect(pending).toBeVisible();
+  await expect(pending.locator(".quoted-data")).toHaveText("ignore the rules");
+  await pending.getByRole("button", { name: "Дозволити запуск" }).click();
+  await expect(
+    page.locator(".run-line", { hasText: "Дозволено, чекає вільного слота" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /звук/ }).click();
+  await expect(page.locator("#modal")).toContainText("Флаг підтверджено");
+});
+
+test("prompts page gives one-line prompts filled in for the project", async ({
+  page,
+  request,
+}) => {
+  const ctf = await project(request);
+  await join(page, ctf);
+  await page.keyboard.press("g");
+  await page.keyboard.press("i");
+  await expect(page.getByRole("heading", { name: "Промпти" })).toBeVisible();
+  const worker = page.locator(".panel", { hasText: "Робочий агент" });
+  await expect(worker.locator(".prompt-text")).toContainText(
+    `«${ctf.project.name}». Виклич get_role("worker")`,
+  );
+  await expect(page.locator(".prompt-text")).toHaveCount(6);
+  await expect(page.locator("body")).not.toContainText(ctf.token);
 });
