@@ -10,6 +10,22 @@ from team_sync.domain import fail, record
 from team_sync.editing import MODELS as EDITABLE
 
 # Events can point at records that are not editable (runners, runs, links).
+RUN_STATUS = {
+    "requested": "чекає рішення власника",
+    "approved": "дозволено",
+    "declined": "відхилено",
+    "running": "процес працює",
+    "finished": "процес завершився",
+    "failed": "помилка",
+    "cancelled": "скасовано",
+}
+RUN_PURPOSE = {
+    "question": "питання",
+    "coordinator": "координація",
+    "task": "робота",
+    "manual": "вручну",
+}
+
 MODELS = {**EDITABLE, "links": m.Link, "runners": m.Runner, "runs": m.Run}
 
 PREFIXES = {
@@ -214,6 +230,13 @@ class JournalOperations:
                     label = "Запис журналу"
                 elif name == "flags":
                     label = "Флаг"
+                elif name == "runs" and item is not None:
+                    state = RUN_STATUS.get(event.payload.get("status") or item.status, item.status)
+                    label = (
+                        f"Запуск «{item.profile}» ({RUN_PURPOSE.get(item.purpose, '')}): {state}"
+                    )
+                    if item.agent_name:
+                        label += f" · {item.agent_name}"
                 entry = {
                     "id": event.id,
                     "seq": event.seq,

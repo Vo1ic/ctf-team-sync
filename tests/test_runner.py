@@ -243,3 +243,104 @@ def test_runner_prompt_carries_role_instructions():
     run = {"id": "r1", "purpose": "task", "task_id": "t1", "requested_by_id": "o", "note": ""}
     prompt = runner.build_prompt(run, profile, "o")
     assert "WORKER agent" in prompt and "single run" in prompt and "solve ONLY task t1" in prompt
+
+
+def test_dead_agent_returns_its_task_and_gets_a_clean_env(
+    tmp_path, live_server, project_live, monkeypatch
+):
+    project = project_live
+    monkeypatch.setenv("LEAK_SECRET", "x")
+    monkeypatch.setenv("OPENCODE_CONFIG_DIR", "/elsewhere")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    config = write_config(
+        tmp_path,
+        owner_access(tmp_path, live_server, project),
+        pawn={
+            "command": [sys.executable, FAKE, "claim_crash", "{task_id}", "{prompt_file}"],
+            "works_tasks": True,
+            "max_runs_per_hour": 1,
+        },
+    )
+    config.workdir = workdir
+
+    class Client:
+        def post(self, path, headers=None, json=None):
+            return httpx.post(live_server + path, headers=headers, json=json)
+
+    challenge = execute(Client(), project, "challenge.create", {"title": "Web"}).json()
+    task = execute(
+        Client(), project, "task.create", {"title": "Solve", "challenge_id": challenge["id"]}
+    ).json()
+    box = runner.Runner(config)
+    assert wait_for(lambda: box.history and not box.processes, box)
+    run = api(live_server, project, "collections/runs")["items"][0]
+    assert run["status"] == "failed" and run["exit_code"] == 1
+    assert f"pwd: {workdir} cwd: {workdir}" in run["output_tail"]
+    assert "leaked: []" in run["output_tail"]
+    # The lease the crashed agent took is returned at once, with a handoff note.
+    item = api(live_server, project, f"resources/tasks/{task['id']}")["item"]
+    assert item["status"] == "open" and item["assignee_id"] is None
+    findings = api(live_server, project, "collections/findings")["items"]
+    assert any("[runner]" in f["body"] and f["task_id"] == task["id"] for f in findings)
+    actors = api(live_server, project, "collections/actors")["items"]
+    agent = next(a for a in actors if a["name"] == run["agent_name"])
+    activities = api(live_server, project, "collections/activities")["items"]
+    assert any(a["actor_id"] == agent["id"] and a["state"] == "idle" for a in activities)
+
+
+def test_silent_agent_is_stopped_by_the_watchdog(tmp_path, live_server, project_live):
+    project = project_live
+    config = write_config(
+        tmp_path,
+        owner_access(tmp_path, live_server, project),
+        slow={
+            "command": [sys.executable, FAKE, "sleep", "-", "{prompt_file}"],
+            "quiet_minutes": 0.03,
+        },
+    )
+    box = runner.Runner(config)
+    box.tick()
+    box.command("run.request", {"profile": "slow"})
+    assert wait_for(lambda: box.history and not box.processes, box, seconds=30)
+    run = api(live_server, project, "collections/runs")["items"][0]
+    assert run["status"] == "failed" and "no new output" in run["output_tail"]
+
+
+def test_coordinator_pass_is_not_repeated_after_restart(tmp_path, live_server, project_live):
+    project = project_live
+    config = write_config(
+        tmp_path,
+        owner_access(tmp_path, live_server, project),
+        coordinator={"command": ["true"], "coordinator": True, "every_minutes": 10},
+    )
+    box = runner.Runner(config)
+    box.runner = {"id": "r"}
+    calls = []
+    box.command = lambda *args, **kwargs: calls.append(args)
+    box.maybe_coordinate({"event_seq": 7})
+    assert len(calls) == 1
+    again = runner.Runner(config)
+    again.runner = {"id": "r"}
+    again.command = box.command
+    again.maybe_coordinate({"event_seq": 9})  # changed, but the last pass was just now
+    assert len(calls) == 1 and again.coordinator_seq == 7
+
+
+def test_local_page_link_survives_restarts_and_is_private(tmp_path, live_server, project_live):
+    config = write_config(
+        tmp_path, owner_access(tmp_path, live_server, project_live), x={"command": ["true"]}
+    )
+    token = runner.ui_token(config)
+    path = runner.write_link(config, 18765, token)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert runner.ui_token(config) == token
+    assert path.read_text().strip() == f"http://127.0.0.1:18765/#token={token}"
+
+
+def test_detect_never_picks_a_paid_model_by_itself(monkeypatch):
+    monkeypatch.setattr(runner.shutil, "which", lambda name: name == "opencode" and "/x/opencode")
+    monkeypatch.setattr(runner, "opencode_models", lambda: ["opencode-go/deepseek-v4.1-flash"])
+    assert runner.detect_profiles()[0] == ""
+    text = runner.detect_profiles(pawn_model="opencode-go/deepseek-v4.1-flash")[0]
+    assert "opencode-go/deepseek-v4.1-flash" in text

@@ -1,7 +1,7 @@
 import { ApiClient, ApiError, commandId } from "./api.js";
 import { connection, accessLink, readAccessLink } from "./access.js";
 import { editRecord as openEditor, showHistory } from "./editor.js";
-import { JournalView, logDetail } from "./journal.js";
+import { JournalView, eventLabels, logDetail } from "./journal.js";
 import { markdown } from "./markdown.js";
 import { graphView } from "./graph.js";
 import {
@@ -1803,7 +1803,11 @@ function eventFeed() {
           el(
             "div",
             {},
-            el("strong", {}, descriptions[event.type] || event.type),
+            el(
+              "strong",
+              {},
+              descriptions[event.type] || eventLabels[event.type] || event.type,
+            ),
             el(
               "small",
               {},
@@ -4019,7 +4023,7 @@ function activityCard(actor) {
   const stale = new Date(activity.expires_at).getTime() <= serverNow();
   const labels = {
     idle: "Вільний",
-    working: "Працює",
+    working: "Звітує: працює",
     waiting_human: "Чекає людини",
     blocked: "Заблокований",
     ready: "Готовий до наступного кроку",
@@ -4033,10 +4037,35 @@ function activityCard(actor) {
     ),
     el("p", {}, activity.detail),
     metadata(`Останній звіт: ${date(activity.updated_at)}`),
+    processNote(actor) ||
+      el(
+        "small",
+        { class: "muted" },
+        "Зі звіту / останньої дії; стан процесу не перевіряється.",
+      ),
+  );
+}
+
+// For agents started by a runner the run record says whether the process is alive.
+function processNote(actor) {
+  const run = (state.data.runs || [])
+    .filter((item) => item.agent_name === actor.name)
+    .at(-1);
+  if (!run) return null;
+  const alive = run.status === "running";
+  return el(
+    "div",
+    { class: "process-note" },
+    badge(
+      alive ? "Процес живий" : "Процесу немає",
+      alive ? "green" : "neutral",
+    ),
     el(
       "small",
       { class: "muted" },
-      "Зі звіту / останньої дії; стан процесу не перевіряється.",
+      alive
+        ? `Runner запустив «${run.profile}» ${date(run.started_at)}.`
+        : `Останній запуск «${run.profile}»: ${runStates[run.status]?.[0] || run.status}${run.finished_at ? ` ${date(run.finished_at)}` : ""}.`,
     ),
   );
 }
@@ -4230,14 +4259,34 @@ function participantOptions(agentsOnly = false) {
 }
 
 function assignTask(task) {
+  const live = task.status === "running" && task.lease_until && !expired(task);
+  const fields = [
+    field("recipient_id", "Кому", {
+      options: participantOptions(task.kind === "artifact_review"),
+      value: task.requested_assignee_id || "",
+    }),
+  ];
+  if (live)
+    fields.push(
+      el(
+        "p",
+        { class: "muted" },
+        `Зараз роботу тримає ${actorName(task.assignee_id)} до ${date(task.lease_until)}. Без примусового звільнення доручення можливе лише після цього часу.`,
+      ),
+      canVerify() &&
+        field("force", "Звільнити активне призначення зараз", {
+          type: "checkbox",
+          hint: "Старий виконавець втратить право завершити роботу й отримає повідомлення. Це не зупиняє процес на його пристрої.",
+        }),
+      canVerify() &&
+        field("reason", "Причина (обов’язково для звільнення)", {
+          type: "textarea",
+          maxlength: 10000,
+        }),
+    );
   openForm(
     "Адресат роботи",
-    [
-      field("recipient_id", "Кому", {
-        options: participantOptions(task.kind === "artifact_review"),
-        value: task.requested_assignee_id || "",
-      }),
-    ],
+    fields.filter(Boolean),
     "Доручити",
     async (values) => {
       await state.api.command(
@@ -4245,6 +4294,7 @@ function assignTask(task) {
         {
           expected_version: task.version,
           recipient_id: values.recipient_id || null,
+          ...(values.force ? { force: true, reason: values.reason || "" } : {}),
         },
         task.id,
       );
@@ -5447,10 +5497,10 @@ function soundDialog() {
 const RUNNER_ONLINE_MS = 90_000;
 const runStates = {
   requested: ["Чекає рішення власника", "amber"],
-  approved: ["Дозволено, стартує", "blue"],
+  approved: ["Дозволено, чекає вільного слота", "amber"],
   declined: ["Відхилено", "red"],
-  running: ["Працює", "blue"],
-  finished: ["Завершено", "green"],
+  running: ["Процес працює", "blue"],
+  finished: ["Процес завершився", "green"],
   failed: ["Помилка", "red"],
   cancelled: ["Скасовано", "neutral"],
 };
@@ -5925,8 +5975,9 @@ function requestRun({
 function agentsPage() {
   const runners = state.data.runners || [];
   const runs = state.data.runs || [];
-  const active = runs.filter((run) =>
-    ["requested", "approved", "running"].includes(run.status),
+  const active = runs.filter((run) => run.status === "running");
+  const waiting = runs.filter((run) =>
+    ["requested", "approved"].includes(run.status),
   );
   const recent = runs
     .filter((run) => !["requested", "approved", "running"].includes(run.status))
@@ -5969,6 +6020,16 @@ function agentsPage() {
             "Жоден агент зараз не працює через runner.",
           ),
     ),
+    waiting.length > 0 &&
+      panel(
+        `Чекають старту (${waiting.length})`,
+        el("div", { class: "task-list" }, waiting.map(runLine)),
+        el(
+          "p",
+          { class: "muted" },
+          "«Чекає рішення» — потрібен дозвіл власника машини. «Чекає вільного слота» — дозволено, runner запустить, щойно звільниться місце (max_parallel).",
+        ),
+      ),
     panel(
       `Runner’и (${runners.length})`,
       runners.length

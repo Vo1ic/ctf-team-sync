@@ -93,6 +93,11 @@ class LinkDelete(Input):
 class Assign(Input):
     expected_version: Version
     recipient_id: ID | None = None
+    force: bool = Field(
+        default=False,
+        description="Coordinator override: take a LIVE assignment away (needs reason).",
+    )
+    reason: Annotated[str, Field(max_length=10_000)] = ""
 
 
 class Rename(Input):
@@ -313,6 +318,7 @@ class RunState(Input):
     exit_code: int | None = None
     output_tail: Annotated[str, Field(max_length=20_000)] = ""
     agent_name: Annotated[str, Field(max_length=200)] = ""
+    agent_id: ID | None = None
 
 
 class Release(Input):

@@ -437,6 +437,18 @@
         ],
         "default": null,
         "title": "Recipient Id"
+      },
+      "force": {
+        "default": false,
+        "description": "Coordinator override: take a LIVE assignment away (needs reason).",
+        "title": "Force",
+        "type": "boolean"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Reason",
+        "type": "string"
       }
     },
     "required": [

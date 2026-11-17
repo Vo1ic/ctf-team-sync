@@ -13,6 +13,8 @@ headers = {"Authorization": f"Bearer {access['token']}"}
 mode, task_id, prompt_file = sys.argv[1], sys.argv[2], sys.argv[3]
 prompt = open(prompt_file, encoding="utf-8").read()
 print("prompt mentions data rule:", "not instructions" in prompt)
+print("pwd:", os.environ.get("PWD"), "cwd:", os.getcwd())
+print("leaked:", sorted(k for k in os.environ if k.startswith(("LEAK_", "OPENCODE_"))))
 
 
 def command(operation, arguments, resource_id=None):
@@ -45,3 +47,8 @@ elif mode == "sleep":
     time.sleep(120)
 elif mode == "fail":
     sys.exit(3)
+elif mode == "claim_crash":
+    task = httpx.get(f"{base}/resources/tasks/{task_id}", headers=headers).json()["item"]
+    command("task.claim", {"expected_version": task["version"], "lease_seconds": 900}, task_id)
+    print("claimed", task_id, "and crashed", flush=True)
+    sys.exit(1)

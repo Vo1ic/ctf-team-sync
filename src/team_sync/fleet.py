@@ -299,6 +299,8 @@ class FleetOperations:
             if data.agent_name:
                 run.agent_name = data.agent_name
             run.version += 1
+            if data.status != "running":
+                self._release_dead_agent(db, project, actor, run, data.agent_id)
             self.emit(
                 db,
                 project,
@@ -322,6 +324,70 @@ class FleetOperations:
                     "result",
                 )
             return record(run)
+
+    def _release_dead_agent(self, db, project, owner, run, agent_id):
+        """The agent process is gone: its work goes back to the team at once instead of
+        sitting behind a lease nobody renews."""
+        query = select(m.Actor).where(
+            m.Actor.project_id == project.id,
+            m.Actor.kind == "agent",
+            m.Actor.owner_id == owner.id,
+        )
+        if agent_id:
+            query = query.where(m.Actor.id == agent_id)
+        elif run.agent_name:
+            query = query.where(m.Actor.name == run.agent_name)
+        else:
+            return
+        agent = db.scalar(query.limit(1))
+        if agent is None:
+            return
+        outcome = {"finished": "завершився", "failed": "завершився з помилкою"}.get(
+            run.status, "зупинено"
+        )
+        for task in db.scalars(
+            select(m.Task).where(
+                m.Task.project_id == project.id,
+                m.Task.assignee_id == agent.id,
+                m.Task.status == "running",
+            )
+        ):
+            finding = self.insert(
+                db,
+                project,
+                m.Finding,
+                author_id=owner.id,
+                title=f"Handoff: {task.title}"[:200],
+                body=(
+                    f"[runner] Процес агента {agent.name} {outcome}"
+                    + (f" (код {run.exit_code})" if run.exit_code is not None else "")
+                    + ", а робота лишалась у нього. Її повернено команді; що він встиг, "
+                    "дивіться в знахідках і журналі."
+                ),
+                evidence=f"Run {run.id} ({run.profile}) ended without completing the task.",
+                kind="observation",
+                task_id=task.id,
+                challenge_id=task.challenge_id,
+                artifact_id=task.artifact_id,
+            )
+            self.emit(db, project, owner, "finding.create", {"resource_id": finding.id})
+            task.status, task.assignee_id, task.lease_until = "open", None, None
+            if task.kind == "artifact_review":
+                task.approval_status, task.approved_by_id, task.analysis_started_at = (
+                    "pending",
+                    None,
+                    None,
+                )
+            task.version += 1
+            self.emit(
+                db,
+                project,
+                owner,
+                "task.release",
+                {"resource_id": task.id, "resource_type": "tasks", "version": task.version},
+            )
+        # The status it last reported described a process that no longer exists.
+        self._activity(db, project, owner, agent, "idle", f"Процес агента {outcome}", ttl=600)
 
     # ----- runs --------------------------------------------------------------------------
 

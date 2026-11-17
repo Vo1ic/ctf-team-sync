@@ -16,3 +16,7 @@ team-sync-mcp.json
 .DS_Store
 Thumbs.db
 .team-sync/
+runner.toml
+*.ui-link
+runner.pid
+runner.log

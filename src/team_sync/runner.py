@@ -13,6 +13,7 @@ participants (questions, notes) reaches agents as quoted data, never as their ta
 import argparse
 import collections
 import contextlib
+import fnmatch
 import hmac
 import json
 import os
@@ -46,6 +47,8 @@ workdir = "."                     # agents start here (challenge files, notes)
 max_parallel = 2
 poll_seconds = 5
 ui_port = 18765                   # local control page on 127.0.0.1; 0 disables
+# Agents get a minimal environment (PATH, HOME, locale, proxies, *_API_KEY ...).
+# pass_env = ["MY_PROVIDER_TOKEN", "OPENCODE_*"]   # extra variables to pass through
 
 # Placeholders: {{prompt}} {{prompt_file}} {{mcp_config}} (Claude Code JSON)
 # {{opencode_config}} (opencode JSON) {{run_id}} {{task_id}} {{workdir}}
@@ -78,6 +81,7 @@ command = ["claude", "-p", "{{prompt}}", "--model", "opus",
 # command = ["opencode", "run", "--model", "deepseek/deepseek-chat", "{{prompt}}"]
 # env = {{ OPENCODE_CONFIG = "{{opencode_config}}" }}
 # confirm_locally = true   # also wait for a click on the local page before starting
+# quiet_minutes = 6        # stop an agent whose output has not changed for this long
 """
 
 DATA_NOTICE = (
@@ -107,6 +111,8 @@ class Profile:
     max_minutes: int = 30
     max_runs_per_hour: int = 6
     confirm_locally: bool = False
+    quiet_minutes: float = 0
+    max_log_mb: int = 20
     env: dict = field(default_factory=dict)
     role: str = "worker"
 
@@ -134,6 +140,31 @@ class Config:
     max_parallel: int = 2
     poll_seconds: float = 5
     ui_port: int = 18765
+    pass_env: list = field(default_factory=list)
+
+
+# What an agent process inherits from the runner; everything else (other tools' session
+# variables, the owner's TEAM_SYNC_* settings, OPENCODE_* of the shell) stays out.
+BASE_ENV = {
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "TZ", "TMPDIR",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+}  # fmt: skip
+BASE_PATTERNS = ["LC_*", "XDG_*", "UV_*", "*_API_KEY", "ANTHROPIC_*", "OPENAI_*"]
+
+
+def child_env(config, extra):
+    patterns = BASE_PATTERNS + list(config.pass_env)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in BASE_ENV or any(fnmatch.fnmatchcase(key, item) for item in patterns)
+    }
+    env.update(extra)
+    # Tools such as opencode take the project directory from PWD, not from the real cwd.
+    env["PWD"] = str(config.workdir)
+    return env
 
 
 def load_config(path):
@@ -169,6 +200,15 @@ def load_config(path):
         profiles[name] = profile
     if not profiles:
         raise ConfigError("Define at least one [profiles.<name>]")
+    unknown = set(raw) - {
+        "access_file", "name", "workdir", "max_parallel", "poll_seconds", "ui_port",
+        "pass_env", "profiles",
+    }  # fmt: skip
+    if unknown:
+        raise ConfigError(f"unknown keys {sorted(unknown)}")
+    pass_env = raw.get("pass_env", [])
+    if not isinstance(pass_env, list) or not all(isinstance(x, str) for x in pass_env):
+        raise ConfigError("pass_env must be a list of variable names or patterns")
     if "access_file" not in raw:
         raise ConfigError("access_file is required (your human access file)")
     try:
@@ -184,6 +224,7 @@ def load_config(path):
         max_parallel=int(raw.get("max_parallel", 2)),
         poll_seconds=float(raw.get("poll_seconds", 5)),
         ui_port=int(raw.get("ui_port", 18765)),
+        pass_env=pass_env,
     )
 
 
@@ -254,6 +295,34 @@ def agent_mcp_config(host, access_file, workdir=None):
     return json.dumps(config, indent=2)
 
 
+# ----- local page link -------------------------------------------------------------------
+
+
+def link_file(config_path):
+    return Path(config_path).with_suffix(".ui-link")
+
+
+def ui_token(config):
+    """Stable across restarts, so a bookmarked local page keeps working."""
+    try:
+        text = link_file(config.path).read_text(encoding="utf-8").strip()
+        token = text.split("#token=", 1)[1]
+        if len(token) >= 24:
+            return token
+    except (OSError, IndexError):
+        pass
+    return secrets.token_urlsafe(24)
+
+
+def write_link(config, port, token):
+    path = link_file(config.path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f"http://127.0.0.1:{port}/#token={token}\n")
+    os.chmod(path, 0o600)
+    return path
+
+
 # ----- runner ----------------------------------------------------------------------------
 
 
@@ -268,6 +337,9 @@ class Process:
     agent_name: str
     slot: int = 0
     stopping: str | None = None
+    agent_id: str | None = None
+    log_size: int = 0
+    changed: float = 0.0
 
 
 class Runner:
@@ -295,12 +367,18 @@ class Runner:
         self.paused = False
         self.awaiting_local: dict[str, dict] = {}
         self.confirmed_local: set[str] = set()
-        self.last_coordinator = 0.0
-        self.coordinator_seq = -1
+        # Remembered across restarts: a restart is not a reason for another pass.
+        self.coordinator_file = self.dir / "coordinator.json"
+        try:
+            saved = json.loads(self.coordinator_file.read_text(encoding="utf-8"))
+            self.last_coordinator = float(saved["at"])
+            self.coordinator_seq = int(saved["seq"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self.last_coordinator, self.coordinator_seq = 0.0, -1
         self.runner = None
         self.queued = 0
         self.last_error = None
-        self.ui_token = secrets.token_urlsafe(24)
+        self.ui_token = ui_token(config)
 
     # --- server ---------------------------------------------------------------------------
     def call(self, method, path, **kwargs):
@@ -326,8 +404,10 @@ class Runner:
             },
         )
 
-    def report(self, run_id, status, exit_code=None, tail="", agent_name=""):
+    def report(self, run_id, status, exit_code=None, tail="", agent_name="", agent_id=None):
         body = {"status": status, "output_tail": tail[-4000:], "agent_name": agent_name}
+        if agent_id:
+            body["agent_id"] = agent_id
         if exit_code is not None:
             body["exit_code"] = exit_code
         try:
@@ -491,16 +571,22 @@ class Runner:
             return text
 
         argv = [expand(part) for part in profile.command]
-        env = {
-            **os.environ,
-            **{key: expand(str(value)) for key, value in profile.env.items()},
-            "TEAM_SYNC_ACCESS_FILE": str(access_file),
-            "TEAM_SYNC_IDENTITY": "direct",
-            "TEAM_SYNC_WORKDIR": str(self.config.workdir),
-            "TEAM_SYNC_RUN_ID": run["id"],
-        }
+        env = child_env(
+            self.config,
+            {
+                **{key: expand(str(value)) for key, value in profile.env.items()},
+                "TEAM_SYNC_ACCESS_FILE": str(access_file),
+                "TEAM_SYNC_IDENTITY": "direct",
+                "TEAM_SYNC_WORKDIR": str(self.config.workdir),
+                "TEAM_SYNC_RUN_ID": run["id"],
+            },
+        )
+        try:
+            agent_id = json.loads(Path(access_file).read_text(encoding="utf-8")).get("actor_id")
+        except (OSError, ValueError):
+            agent_id = None
         log_path = self.dir / "logs" / f"{run['id']}.log"
-        log = open(log_path, "wb")  # noqa: SIM115 - handed to the child process
+        log = os.fdopen(os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb")
         try:
             popen = self.spawn(
                 argv,
@@ -530,8 +616,10 @@ class Runner:
                 now + profile.max_minutes * 60,
                 agent_name,
                 slot,
+                agent_id=agent_id,
+                changed=now,
             )
-        self.report(run["id"], "running", agent_name=agent_name)
+        self.report(run["id"], "running", agent_name=agent_name, agent_id=agent_id)
 
     def tail(self, path, size=4000):
         try:
@@ -558,6 +646,7 @@ class Runner:
         for run_id, process in items:
             code = process.popen.poll()
             if code is None:
+                self.watch(run_id, process, now)
                 if now > process.deadline:
                     if process.stopping is None:
                         self.stop(run_id, "timeout")
@@ -575,6 +664,17 @@ class Runner:
                     "failed",
                     tail + f"\n[runner] stopped after {process.profile.max_minutes} min",
                 )
+            elif process.stopping == "quiet":
+                status, tail = (
+                    "failed",
+                    tail + f"\n[runner] no new output for {process.profile.quiet_minutes} min; "
+                    "stopped (runaway or stuck agent)",
+                )
+            elif process.stopping == "log_size":
+                status, tail = (
+                    "failed",
+                    tail + f"\n[runner] output exceeded {process.profile.max_log_mb} MB; stopped",
+                )
             else:
                 status = "finished" if code == 0 else "failed"
             self.history.appendleft(
@@ -588,7 +688,25 @@ class Runner:
                     "tail": tail[-1500:],
                 }
             )
-            self.report(run_id, status, code, tail, process.agent_name)
+            self.report(run_id, status, code, tail, process.agent_name, process.agent_id)
+
+    def watch(self, run_id, process, now):
+        """Stop agents that stopped making progress or flood their output."""
+        if process.stopping is not None:
+            return
+        try:
+            size = process.log_path.stat().st_size
+        except OSError:
+            return
+        if size != process.log_size:
+            process.log_size, process.changed = size, now
+        if size > process.profile.max_log_mb * 1024 * 1024:
+            self.stop(run_id, "log_size")
+        elif (
+            process.profile.quiet_minutes
+            and now - process.changed > process.profile.quiet_minutes * 60
+        ):
+            self.stop(run_id, "quiet")
 
     # --- automatic work -------------------------------------------------------------------
     def pick_questions(self, questions):
@@ -650,14 +768,18 @@ class Runner:
         for profile in self.config.profiles.values():
             if not profile.coordinator or not self.rate_ok(profile):
                 continue
-            due = time.monotonic() - self.last_coordinator >= profile.every_minutes * 60
+            due = time.time() - self.last_coordinator >= profile.every_minutes * 60
             if due and work["event_seq"] != self.coordinator_seq:
                 with contextlib.suppress(identity.IdentityError):
                     self.command(
                         "run.request", {"profile": profile.name, "runner_id": self.runner["id"]}
                     )
-                    self.last_coordinator = time.monotonic()
+                    self.last_coordinator = time.time()
                     self.coordinator_seq = work["event_seq"]
+                    with contextlib.suppress(OSError):
+                        self.coordinator_file.write_text(
+                            json.dumps({"at": self.last_coordinator, "seq": self.coordinator_seq})
+                        )
             return
 
     # --- loop -----------------------------------------------------------------------------
@@ -845,8 +967,9 @@ def start_ui(runner, port):
 # ----- automatic setup ---------------------------------------------------------------
 
 PREFERRED = {
-    # opencode model ids, best first; the first one `opencode models` lists is used.
-    "pawn": ["opencode-go/deepseek-v4.1-flash", "opencode/deepseek-v4.1-flash-free"],
+    # Free opencode model ids, best first; the first one `opencode models` lists is used.
+    # Paid or rate-limited models are used only when named explicitly (--pawn-model ...).
+    "pawn": ["opencode/deepseek-v4.1-flash-free"],
     "vision": ["opencode/nemotron-3.5-super-vl-free"],
 }
 CLAUDE_TOOLS = "mcp__team-sync,Bash,Read,Grep,Glob,Write,Edit"
@@ -871,7 +994,8 @@ def detect_profiles(pawn_model=None, expert_model=None, coordinator_model=None):
     def pick(kind, override):
         if override:
             return override
-        return next((m for m in PREFERRED[kind] if m in models), None)
+        listed = next((m for m in PREFERRED[kind] if m in models), None)
+        return listed or next((m for m in models if m.endswith("-free")), None)
 
     def opencode_profile(name, model, extra):
         return (
@@ -896,7 +1020,8 @@ def detect_profiles(pawn_model=None, expert_model=None, coordinator_model=None):
                 "pawn",
                 pawn,
                 'description = "Cheap worker: takes open tasks by itself"\n'
-                "works_tasks = true\nmax_minutes = 20\nmax_runs_per_hour = 12\n",
+                "works_tasks = true\nmax_minutes = 20\nquiet_minutes = 6\n"
+                "max_runs_per_hour = 12\n",
             )
         )
         summary.append(f"pawn         opencode {pawn}")
@@ -973,12 +1098,19 @@ def pid_alive(pid_file):
 
 
 def background(path):
-    """Start the runner detached; wait for its local page link and print it."""
+    """Start the runner detached; wait for its local page link and print it. A running
+    runner is restarted when its config changed since it started."""
     pid_file, log_file = path.with_suffix(".pid"), path.with_suffix(".log")
-    if (pid := pid_alive(pid_file)) is not None:
+    if (pid := pid_alive(pid_file)) is not None and path.stat().st_mtime > pid_file.stat().st_mtime:
+        print(f"{path.name} changed since the runner started: restarting it.")
+        stop_background(path)
+        pid = None
+    if pid is not None:
         print(f"Runner already running (pid {pid}); log: {log_file}")
     else:
-        with open(log_file, "ab") as log:
+        offset = log_file.stat().st_size if log_file.exists() else 0
+        fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "ab") as log:
             process = subprocess.Popen(
                 [sys.executable, "-m", "team_sync.runner", "--config", str(path)],
                 stdin=subprocess.DEVNULL,
@@ -989,21 +1121,32 @@ def background(path):
         pid_file.write_text(str(process.pid))
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline and process.poll() is None:
-            if "local page:" in log_file.read_text(encoding="utf-8", errors="replace"):
+            with open(log_file, "rb") as handle:
+                handle.seek(offset)
+                fresh = handle.read().decode("utf-8", "replace")
+            if "profiles, project" in fresh:  # printed after the link file is written
                 break
             time.sleep(0.5)
         if process.poll() is not None:
             print(f"Runner exited (code {process.returncode}); see {log_file}", file=sys.stderr)
             return 1
         print(f"Runner started (pid {process.pid}); log: {log_file}")
-    lines = [
-        line
-        for line in log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-        if "local page:" in line
-    ]
-    if lines:
-        print(lines[-1].replace("[runner] ", ""))
+    with contextlib.suppress(OSError):
+        print("local page: " + link_file(path).read_text(encoding="utf-8").strip())
+    print(f"Link again: team-sync-runner --config {path} --ui-link")
     print(f"Stop: team-sync-runner --config {path} --stop")
+    return 0
+
+
+def show_link(path):
+    if pid_alive(path.with_suffix(".pid")) is None:
+        print("Runner is not running: start it with --background.", file=sys.stderr)
+        return 1
+    try:
+        print(link_file(path).read_text(encoding="utf-8").strip())
+    except OSError:
+        print("No local page (ui_port = 0?)", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1038,6 +1181,7 @@ def main(argv=None):
     parser.add_argument("--once", action="store_true", help="one poll cycle (diagnostics)")
     parser.add_argument("--background", action="store_true", help="start detached and exit")
     parser.add_argument("--stop", action="store_true", help="stop a --background runner")
+    parser.add_argument("--ui-link", action="store_true", help="print the local page link")
     args = parser.parse_args(argv)
     path = Path(args.config).expanduser().resolve()
     if args.init:
@@ -1061,6 +1205,8 @@ def main(argv=None):
         return 0
     if args.stop:
         return stop_background(path)
+    if args.ui_link:
+        return show_link(path)
     try:
         config = load_config(path)
     except ConfigError as error:
@@ -1092,12 +1238,16 @@ def main(argv=None):
         print(json.dumps({"runs": len(work["runs"]), "questions": len(work["questions"])}))
         return 0
     server = start_ui(runner, config.ui_port) if config.ui_port else None
+    # The token lives in an owner-only file next to the config, not in the log.
+    link = write_link(config, server.server_port, runner.ui_token) if server else None
     print(f"[runner] {config.name}: {len(config.profiles)} profiles, project {runner.project_name}")
     if server:
-        # The local page token stays in this terminal; the page keeps it in the URL fragment.
-        print(
-            f"[runner] local page: http://127.0.0.1:{server.server_port}/#token={runner.ui_token}"
-        )
+        if sys.stdout.isatty():
+            print(
+                f"[runner] local page: http://127.0.0.1:{server.server_port}/#token={runner.ui_token}"
+            )
+        else:
+            print(f"[runner] local page: http://127.0.0.1:{server.server_port}/ (link: {link})")
     stop_event = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop_event.set())

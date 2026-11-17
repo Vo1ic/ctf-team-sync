@@ -2955,6 +2955,18 @@
             "maxLength": 200,
             "title": "Agent Name",
             "default": ""
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
           }
         },
         "additionalProperties": false,

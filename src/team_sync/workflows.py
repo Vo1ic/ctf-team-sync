@@ -197,10 +197,22 @@ class WorkflowOperations:
         if actor.role not in {"owner", "coordinator"} and task.created_by_id != actor.id:
             fail(403, "forbidden", "Only the creator or coordinator may change the recipient")
         timestamp = db.scalar(select(func.clock_timestamp()))
-        if task.status in {"done", "review"} or (
-            task.status == "running" and task.lease_until and task.lease_until > timestamp
-        ):
-            fail(409, "task_in_progress", "Release a live task before changing its recipient")
+        if task.status in {"done", "review"}:
+            fail(409, "task_in_progress", "The task is completed or waits for flag review")
+        if task.status == "running" and task.lease_until and task.lease_until > timestamp:
+            if not data.force:
+                fail(
+                    409,
+                    "task_in_progress",
+                    f"Live assignment until {task.lease_until.isoformat()}: wait, or force=true "
+                    "with a reason (coordinator)",
+                    lease_until=task.lease_until.isoformat(),
+                )
+            if actor.role not in {"owner", "coordinator"}:
+                fail(403, "override_forbidden", "Only a coordinator can override a live task")
+            if not data.reason.strip():
+                fail(422, "override_reason_required", "Explain why the assignment is taken away")
+            self._override_lease(db, project, actor, task, data.reason)
         target = self.get(db, m.Actor, project.id, data.recipient_id) if data.recipient_id else None
         if target and (not target.active or target.role == "observer"):
             fail(409, "inactive_recipient", "Select an active participant with permission to work")

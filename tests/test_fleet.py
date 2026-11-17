@@ -337,3 +337,81 @@ def test_roles_and_project_prompts(client, project):
     assert "Test CTF" in text and "Captain" in text and project["token"] not in text
     worker = next(item for item in prompts["items"] if item["id"] == "worker")
     assert 'get_role("worker")' in worker["prompt"] and len(worker["prompt"]) < 300
+
+
+def test_coordinator_can_take_a_live_assignment_away(client, project):
+    pawn, other = enroll(client, project, "Pawn"), enroll(client, project, "Other")
+    _, task = challenge_task(client, project, pawn["token"])
+    plain = execute(
+        client,
+        project,
+        "task.assign",
+        {"expected_version": task["version"], "recipient_id": other["actor"]["id"]},
+        task["id"],
+    )
+    assert plain.status_code == 409 and "lease_until" in plain.json()
+    no_reason = execute(
+        client,
+        project,
+        "task.assign",
+        {"expected_version": task["version"], "recipient_id": other["actor"]["id"], "force": True},
+        task["id"],
+    )
+    assert no_reason.status_code == 422
+    by_worker = execute(
+        client,
+        project,
+        "task.assign",
+        {"expected_version": task["version"], "force": True, "reason": "mine now"},
+        task["id"],
+        other["token"],
+    )
+    assert by_worker.status_code == 403
+    moved = ok(
+        execute(
+            client,
+            project,
+            "task.assign",
+            {
+                "expected_version": task["version"],
+                "recipient_id": other["actor"]["id"],
+                "force": True,
+                "reason": "Pawn's process died",
+            },
+            task["id"],
+        )
+    )
+    assert moved["status"] == "open" and moved["assignee_id"] is None
+    assert moved["requested_assignee_id"] == other["actor"]["id"]
+    assert any("process died" in item["body"] for item in inbox(client, project, pawn["token"]))
+
+
+def test_finished_run_releases_only_its_own_agents_leases(client, project):
+    register(client, project, project["token"])
+    agent = enroll(client, project, "Expert_ab")
+    stranger = enroll(client, project, "Stranger")
+    challenge, task = challenge_task(client, project, agent["token"])
+    kept = ok(
+        execute(client, project, "task.create", {"title": "Other", "challenge_id": challenge["id"]})
+    )
+    kept = ok(
+        execute(
+            client, project, "task.claim", {"expected_version": 1}, kept["id"], stranger["token"]
+        )
+    )
+    run = ok(execute(client, project, "run.request", {"profile": "expert"}))
+    state = root(project) + f"/runs/{run['id']}/state"
+    ok(client.post(state, headers=headers(project["token"]), json={"status": "running"}))
+    # The process is gone: its agent's lease is returned, other agents keep theirs.
+    ok(
+        client.post(
+            state,
+            headers=headers(project["token"]),
+            json={"status": "failed", "exit_code": 1, "agent_id": agent["actor"]["id"]},
+        )
+    )
+    item = lambda task_id: ok(  # noqa: E731
+        client.get(root(project) + f"/resources/tasks/{task_id}", headers=headers(project["token"]))
+    )["item"]
+    assert item(task["id"])["status"] == "open" and item(task["id"])["assignee_id"] is None
+    assert item(kept["id"])["status"] == "running"

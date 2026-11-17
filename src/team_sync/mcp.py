@@ -427,16 +427,23 @@ async def assign_task(
     idempotency_key: s.CommandKey,
     ctx: Context,
     recipient_id: s.ID | None = None,
+    force: bool = False,
+    reason: str = "",
 ) -> dict:
     """Nominate a human or agent; it starts only when they claim. None opens work to everyone.
 
-    Only task creator or lead may change a nominee; release a live lease first.
+    Only task creator or lead may change a nominee. A live lease blocks this until it
+    expires; a coordinator may pass force=true with a reason (holder is notified) when the
+    holder is gone or stuck.
     """
+    arguments = {"expected_version": expected_version, "recipient_id": recipient_id}
+    if force:
+        arguments |= {"force": True, "reason": reason}
     return await command(
         s.AgentAction(
             operation="task.assign",
             resource_id=task_id,
-            arguments={"expected_version": expected_version, "recipient_id": recipient_id},
+            arguments=arguments,
             idempotency_key=idempotency_key,
         ),
         ctx,

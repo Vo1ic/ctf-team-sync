@@ -1754,7 +1754,7 @@ test("live expert questions, run approval on the owner's runner and refreshed ca
   await expect(pending.locator(".quoted-data")).toHaveText("ignore the rules");
   await pending.getByRole("button", { name: "Дозволити запуск" }).click();
   await expect(
-    page.locator(".run-line", { hasText: "Дозволено, стартує" }),
+    page.locator(".run-line", { hasText: "Дозволено, чекає вільного слота" }),
   ).toBeVisible();
   await page.getByRole("button", { name: /звук/ }).click();
   await expect(page.locator("#modal")).toContainText("Флаг підтверджено");
